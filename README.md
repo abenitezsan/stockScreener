@@ -41,7 +41,64 @@ HeyTrade no publica su catálogo en un formato descargable. El universo se forma
 
 Cada valor usa su ticker de Yahoo: `AAPL`, `ENB.TO`, `SAN.MC`, `SAP.DE`, `ULVR.L`…
 
-## Puesta en marcha
+## Despliegue con Docker (recomendado)
+
+GitHub Actions (`.github/workflows/docker.yml`) ejecuta el lint, comprueba las migraciones y pasa
+los tests contra Postgres en cada push. Si todo pasa, publica la imagen en Docker Hub para
+`linux/amd64` y `linux/arm64`:
+
+| Origen | Etiquetas |
+|---|---|
+| Push a la rama por defecto | `latest`, `sha-<commit>` |
+| Tag `v1.2.3` | `1.2.3`, `1.2`, `sha-<commit>` |
+| Pull requests y otras ramas | solo compila, no publica |
+
+### 1. Configurar Docker Hub y GitHub (una vez)
+
+1. En Docker Hub: *Account settings → Personal access tokens → Generate new token* con permiso
+   **Read & Write**.
+2. En GitHub, en el repositorio: *Settings → Secrets and variables → Actions*:
+   - Secret `DOCKERHUB_USERNAME`: tu usuario de Docker Hub.
+   - Secret `DOCKERHUB_TOKEN`: el token del paso anterior.
+   - (Opcional) Variable `DOCKERHUB_IMAGE`, si quieres otro nombre distinto de
+     `<usuario>/stockscreener`.
+3. Lanza el workflow (*Actions → CI y Docker Hub → Run workflow*) o haz un push a la rama por
+   defecto.
+
+### 2. Preparar Postgres (una vez)
+
+Conviene usar un usuario propio que solo sea dueño de su esquema:
+
+```sql
+CREATE ROLE stockscreener LOGIN PASSWORD 'cambia-esto';
+CREATE SCHEMA stockscreener AUTHORIZATION stockscreener;
+```
+
+### 3. Arrancar en el VPS
+
+En un directorio del VPS, deja el `docker-compose.yml` del repositorio y un `.env` basado en
+`.env.example`:
+
+```bash
+# .env
+DATABASE_URL=postgresql+psycopg://stockscreener:cambia-esto@localhost:5432/midb
+STOCKSCREENER_IMAGE=tuusuario/stockscreener:latest
+```
+
+```bash
+docker compose pull && docker compose up -d        # aplica las migraciones al arrancar
+docker compose exec stockscreener python -m app.cli universe
+docker compose exec stockscreener python -m app.cli refresh bootstrap
+docker compose logs -f
+```
+
+Para actualizar: `docker compose pull && docker compose up -d`. Para quedarte en una versión
+concreta, usa una etiqueta `vX.Y.Z` en `STOCKSCREENER_IMAGE` en lugar de `latest`.
+
+La imagen corre como usuario sin privilegios, tiene healthcheck en `/health` y aplica
+`alembic upgrade head` al arrancar (se desactiva con `RUN_MIGRATIONS=false`).
+
+## Puesta en marcha sin Docker
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
