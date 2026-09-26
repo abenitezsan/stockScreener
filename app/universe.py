@@ -1,0 +1,220 @@
+"""Universo de valores: componentes de índices que cubren los mercados de HeyTrade.
+
+Las listas se descargan de Wikipedia y de la cartera del ETF iShares STOXX Europe 600, y los
+tickers se traducen al formato de Yahoo. Lo que falte se añade a mano (`manual`) o desde CSV.
+"""
+
+import csv
+import io
+import logging
+import re
+import urllib.request
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+
+import pandas as pd
+from sqlalchemy import any_, func, select, update
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Session
+
+from app.analysis.sectors import region_for
+from app.models import Security
+
+log = logging.getLogger(__name__)
+
+USER_AGENT = "Mozilla/5.0 (compatible; stockscreener/0.1)"
+MANUAL = "manual"
+
+# Palabra clave de la columna "Exchange" de iShares -> sufijo de Yahoo. El orden importa
+# ("nordic" genérico es Estocolmo, pero Copenhague y Helsinki también dicen "Nordic").
+EXCHANGE_SUFFIXES = [
+    ("madrid", ".MC"),
+    ("xetra", ".DE"),
+    ("frankfurt", ".DE"),
+    ("deutsche b", ".DE"),
+    ("paris", ".PA"),
+    ("amsterdam", ".AS"),
+    ("brussels", ".BR"),
+    ("lisbon", ".LS"),
+    ("dublin", ".IR"),
+    ("irish", ".IR"),
+    ("italiana", ".MI"),
+    ("milan", ".MI"),
+    ("london", ".L"),
+    ("swiss", ".SW"),
+    ("zurich", ".SW"),
+    ("oslo", ".OL"),
+    ("copenhagen", ".CO"),
+    ("helsinki", ".HE"),
+    ("stockholm", ".ST"),
+    ("nordic", ".ST"),
+    ("wiener", ".VI"),
+    ("vienna", ".VI"),
+]
+
+
+def fetch(url: str) -> str:
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        return response.read().decode("utf-8-sig", errors="replace")
+
+
+# --- Traducción de tickers -------------------------------------------------------
+
+
+def us_symbol(ticker: str) -> str:
+    return ticker.strip().upper().replace(".", "-")  # BRK.B -> BRK-B
+
+
+def with_suffix(ticker: str, suffix: str) -> str:
+    """ACS -> ACS.MC; NOVO B -> NOVO-B.CO; RR. -> RR.L; BT.A -> BT-A.L; ya con sufijo, igual."""
+    ticker = ticker.strip().upper()
+    if ticker.endswith(suffix.upper()):
+        return ticker
+    ticker = re.sub(r"[.\s/]+", "-", ticker.rstrip(".")).strip("-")
+    return ticker + suffix
+
+
+def exchange_suffix(exchange: str) -> str | None:
+    name = exchange.lower()
+    return next((suffix for key, suffix in EXCHANGE_SUFFIXES if key in name), None)
+
+
+# --- Fuentes ---------------------------------------------------------------------
+
+
+def _wiki_symbols(
+    html: str, columns: tuple[str, ...], translate: Callable[[str], str]
+) -> list[str]:
+    """Busca la primera tabla con alguna de las columnas indicadas y traduce sus tickers."""
+    for table in pd.read_html(io.StringIO(html)):
+        if isinstance(table.columns, pd.MultiIndex):
+            table.columns = [c[-1] for c in table.columns]
+        column = next((c for c in table.columns if str(c).strip() in columns), None)
+        if column is not None and len(table) >= 10:
+            return [translate(str(t)) for t in table[column].dropna() if str(t).strip()]
+    raise ValueError(f"No se encontró ninguna tabla con las columnas {columns}")
+
+
+def parse_ishares_holdings(text: str) -> list[str]:
+    """CSV de posiciones de iShares: unas líneas de cabecera y después la tabla."""
+    lines = text.splitlines()
+    start = next(
+        i
+        for i, line in enumerate(lines)
+        if line.startswith(("Ticker", '"Ticker', "Emittententicker"))
+    )
+    symbols = []
+    for row in csv.DictReader(lines[start:]):
+        ticker = row.get("Ticker") or row.get("Emittententicker") or ""
+        asset_class = row.get("Asset Class") or row.get("Anlageklasse") or "Equity"
+        exchange = row.get("Exchange") or row.get("Börse") or ""
+        if not ticker or asset_class not in ("Equity", "Aktien"):
+            continue
+        suffix = exchange_suffix(exchange)
+        if suffix is None:
+            log.info("Bolsa no cubierta, se omite: %s (%s)", ticker, exchange)
+            continue
+        symbols.append(with_suffix(ticker, suffix))
+    return symbols
+
+
+@dataclass(frozen=True)
+class Source:
+    url: str
+    parse: Callable[[str], list[str]]
+
+
+SOURCES: dict[str, Source] = {
+    "SP500": Source(
+        "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
+        lambda html: _wiki_symbols(html, ("Symbol",), us_symbol),
+    ),
+    "NASDAQ100": Source(
+        "https://en.wikipedia.org/wiki/Nasdaq-100",
+        lambda html: _wiki_symbols(html, ("Ticker", "Symbol"), us_symbol),
+    ),
+    "TSX60": Source(
+        "https://en.wikipedia.org/wiki/S%26P/TSX_60",
+        lambda html: _wiki_symbols(html, ("Symbol", "Ticker"), lambda t: with_suffix(t, ".TO")),
+    ),
+    "IBEX35": Source(
+        "https://en.wikipedia.org/wiki/IBEX_35",
+        lambda html: _wiki_symbols(html, ("Ticker", "Symbol"), lambda t: with_suffix(t, ".MC")),
+    ),
+    "STOXX600": Source(
+        "https://www.ishares.com/uk/individual/en/products/251931/"
+        "ishares-stoxx-europe-600-ucits-etf-de-fund/1506575576011.ajax"
+        "?fileType=csv&fileName=EXSA_holdings&dataType=fund",
+        parse_ishares_holdings,
+    ),
+}
+
+
+# --- Persistencia ----------------------------------------------------------------
+
+
+def upsert_universe(session: Session, universe: str, symbols: Iterable[str]) -> int:
+    """Añade la etiqueta `universe` a los símbolos dados y se la quita a los que ya no están.
+
+    Un valor que se queda sin ninguna etiqueta se desactiva (no se borra: puede tener historia).
+    """
+    symbols = sorted(set(symbols))
+    if symbols:
+        stmt = insert(Security).values(
+            [{"symbol": s, "region": region_for(s), "universes": [universe]} for s in symbols]
+        )
+        session.execute(
+            stmt.on_conflict_do_update(
+                index_elements=[Security.symbol],
+                set_={
+                    "universes": func.array_append(
+                        func.array_remove(Security.universes, universe), universe
+                    ),
+                    "active": True,
+                },
+            )
+        )
+    if universe != MANUAL:
+        session.execute(
+            update(Security)
+            .where(any_(Security.universes) == universe, Security.symbol.not_in(symbols))
+            .values(universes=func.array_remove(Security.universes, universe))
+        )
+        session.execute(
+            update(Security).where(func.cardinality(Security.universes) == 0).values(active=False)
+        )
+    session.commit()
+    return len(symbols)
+
+
+def sync_sources(session: Session, names: Iterable[str] | None = None) -> dict[str, int | str]:
+    """Descarga cada fuente y actualiza el universo. Un fallo en una fuente no para las demás."""
+    result: dict[str, int | str] = {}
+    for name in names or SOURCES:
+        source = SOURCES[name]
+        try:
+            symbols = source.parse(fetch(source.url))
+        except Exception as exc:
+            log.exception("Error cargando %s", name)
+            result[name] = f"error: {exc}"
+            continue
+        result[name] = upsert_universe(session, name, symbols)
+    return result
+
+
+def import_csv(session: Session, path: str, universe: str = MANUAL) -> int:
+    """CSV con una columna `symbol` (ticker de Yahoo), o un ticker por línea."""
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.reader(f))
+    if rows and rows[0] and rows[0][0].strip().lower() == "symbol":
+        rows = rows[1:]
+    return upsert_universe(session, universe, [r[0].strip().upper() for r in rows if r and r[0]])
+
+
+def active_symbols(session: Session) -> list[tuple[int, str]]:
+    return list(
+        session.execute(
+            select(Security.id, Security.symbol).where(Security.active).order_by(Security.symbol)
+        )
+    )

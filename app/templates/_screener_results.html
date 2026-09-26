@@ -1,0 +1,34 @@
+<div class="tabs" role="tablist">
+  <button type="button" class="{{ '' if not filters.sector else 'outline' }}" onclick="setFilter('sector', '')">Todos</button>
+  {% for sector, count in sectors %}
+  <button type="button" class="{{ '' if filters.sector == sector else 'outline' }}" onclick="setFilter('sector', {{ sector | tojson | forceescape }})">{{ sector }} <span class="muted">{{ count }}</span></button>
+  {% endfor %}
+</div>
+<p class="muted">{{ rows | length }} valores{% if rows | length >= 500 %} (mostrando los 500 primeros){% endif %}. Las celdas resaltadas tienen una yield actual superior al 6 %.</p>
+<div class="overflow-auto">
+<table class="striped">
+  <thead><tr>
+    <th></th>
+    {% for col in columns %}{% set label, _, kind = COLUMNS[col] %}
+    <th class="{{ 'num' if kind not in ('text',) }}"><a class="sort" onclick="sortBy('{{ col }}')">{{ label }}{% if filters.sort == col %} {{ '▼' if filters.desc else '▲' }}{% endif %}</a></th>
+    {% endfor %}
+    <th>Semáforo</th><th>Avisos</th>
+  </tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td>{% with id=row.id, watched=row.id in watched %}{% include "_watch_button.html" %}{% endwith %}</td>
+      {% for col in columns %}{% set _, _, kind = COLUMNS[col] %}{% set value = row[col] %}
+        {% if col == 'symbol' %}<td><a href="/security/{{ value }}">{{ value }}</a></td>
+        {% elif col == 'name' %}<td class="name" title="{{ value or '' }}">{{ value or '–' }}</td>
+        {% else %}<td class="{{ 'num' if kind != 'text' }}{{ ' hi' if col == 'yield_ttm' and value and value > 0.06 }}">{{ value | fmt(kind) }}</td>{% endif %}
+      {% endfor %}
+      <td>{% with signal=row.signal %}{% include "_signal.html" %}{% endwith %}</td>
+      <td>{% with flags=row.flags %}{% include "_flags.html" %}{% endwith %}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="{{ columns | length + 3 }}">Ningún valor cumple los filtros. Si la base de datos está vacía, ejecuta la carga inicial (ver README).</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>

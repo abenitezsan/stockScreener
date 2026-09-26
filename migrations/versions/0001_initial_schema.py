@@ -2,7 +2,7 @@
 
 Revision ID: 0001
 Revises:
-Create Date: 2026-09-26 18:52:53.158129
+Create Date: 2026-09-26 19:54:07.201261
 """
 
 from collections.abc import Sequence
@@ -27,7 +27,7 @@ def upgrade() -> None:
         "fx_rates",
         sa.Column("day", sa.Date(), nullable=False),
         sa.Column("currency", sa.String(length=3), nullable=False),
-        sa.Column("rate_to_base", sa.Numeric(precision=20, scale=10), nullable=False),
+        sa.Column("rate_to_base", sa.Double(), nullable=False),
         sa.PrimaryKeyConstraint("day", "currency", name=op.f("pk_fx_rates")),
         schema=SCHEMA,
     )
@@ -38,11 +38,14 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=255), nullable=True),
         sa.Column("isin", sa.String(length=12), nullable=True),
         sa.Column("exchange", sa.String(length=32), nullable=True),
+        sa.Column("region", sa.String(length=2), nullable=False),
         sa.Column("country", sa.String(length=64), nullable=True),
         sa.Column("currency", sa.String(length=3), nullable=True),
         sa.Column("price_currency", sa.String(length=3), nullable=True),
+        sa.Column("financial_currency", sa.String(length=3), nullable=True),
         sa.Column("sector", sa.String(length=128), nullable=True),
         sa.Column("industry", sa.String(length=128), nullable=True),
+        sa.Column("sector_group", sa.String(length=16), nullable=True),
         sa.Column("universes", sa.ARRAY(sa.String(length=32)), server_default="{}", nullable=False),
         sa.Column("active", sa.Boolean(), server_default="true", nullable=False),
         sa.Column(
@@ -59,6 +62,9 @@ def upgrade() -> None:
         op.f("ix_securities_country"), "securities", ["country"], unique=False, schema=SCHEMA
     )
     op.create_index(op.f("ix_securities_isin"), "securities", ["isin"], unique=False, schema=SCHEMA)
+    op.create_index(
+        op.f("ix_securities_region"), "securities", ["region"], unique=False, schema=SCHEMA
+    )
     op.create_index(
         op.f("ix_securities_sector"), "securities", ["sector"], unique=False, schema=SCHEMA
     )
@@ -83,8 +89,7 @@ def upgrade() -> None:
         sa.Column("security_id", sa.Integer(), nullable=False),
         sa.Column("ex_date", sa.Date(), nullable=False),
         sa.Column("pay_date", sa.Date(), nullable=True),
-        sa.Column("amount", sa.Numeric(precision=20, scale=6), nullable=False),
-        sa.Column("currency", sa.String(length=3), nullable=True),
+        sa.Column("amount", sa.Double(), nullable=False),
         sa.ForeignKeyConstraint(
             ["security_id"],
             [f"{SCHEMA}.securities.id"],
@@ -96,30 +101,51 @@ def upgrade() -> None:
         schema=SCHEMA,
     )
     op.create_table(
+        "financials_annual",
+        sa.Column("security_id", sa.Integer(), nullable=False),
+        sa.Column("period_end", sa.Date(), nullable=False),
+        sa.Column("revenue", sa.Double(), nullable=True),
+        sa.Column("net_income", sa.Double(), nullable=True),
+        sa.Column("eps", sa.Double(), nullable=True),
+        sa.Column("operating_cashflow", sa.Double(), nullable=True),
+        sa.Column("capex", sa.Double(), nullable=True),
+        sa.Column("free_cashflow", sa.Double(), nullable=True),
+        sa.Column("dividends_paid", sa.Double(), nullable=True),
+        sa.Column("shares", sa.Double(), nullable=True),
+        sa.ForeignKeyConstraint(
+            ["security_id"],
+            [f"{SCHEMA}.securities.id"],
+            name=op.f("fk_financials_annual_security_id_securities"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("security_id", "period_end", name=op.f("pk_financials_annual")),
+        schema=SCHEMA,
+    )
+    op.create_table(
         "fundamentals",
         sa.Column("security_id", sa.Integer(), nullable=False),
+        sa.Column("market_cap", sa.Double(), nullable=True),
         sa.Column("market_cap_eur", sa.Double(), nullable=True),
+        sa.Column("eps_ttm", sa.Double(), nullable=True),
+        sa.Column("eps_forward", sa.Double(), nullable=True),
         sa.Column("pe_ttm", sa.Double(), nullable=True),
         sa.Column("pe_forward", sa.Double(), nullable=True),
         sa.Column("price_to_book", sa.Double(), nullable=True),
-        sa.Column("price_to_sales", sa.Double(), nullable=True),
         sa.Column("ev_to_ebitda", sa.Double(), nullable=True),
         sa.Column("dividend_yield", sa.Double(), nullable=True),
         sa.Column("dividend_rate", sa.Double(), nullable=True),
         sa.Column("payout_ratio", sa.Double(), nullable=True),
         sa.Column("five_year_avg_dividend_yield", sa.Double(), nullable=True),
-        sa.Column("dividend_growth_years", sa.Integer(), nullable=True),
         sa.Column("roe", sa.Double(), nullable=True),
-        sa.Column("roa", sa.Double(), nullable=True),
         sa.Column("profit_margin", sa.Double(), nullable=True),
-        sa.Column("operating_margin", sa.Double(), nullable=True),
         sa.Column("revenue_growth", sa.Double(), nullable=True),
         sa.Column("earnings_growth", sa.Double(), nullable=True),
         sa.Column("debt_to_equity", sa.Double(), nullable=True),
-        sa.Column("current_ratio", sa.Double(), nullable=True),
         sa.Column("beta", sa.Double(), nullable=True),
         sa.Column("week52_high", sa.Double(), nullable=True),
         sa.Column("week52_low", sa.Double(), nullable=True),
+        sa.Column("ma200", sa.Double(), nullable=True),
+        sa.Column("target_mean_price", sa.Double(), nullable=True),
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
@@ -136,28 +162,17 @@ def upgrade() -> None:
         schema=SCHEMA,
     )
     op.create_index(
-        op.f("ix_fundamentals_dividend_yield"),
-        "fundamentals",
-        ["dividend_yield"],
-        unique=False,
-        schema=SCHEMA,
-    )
-    op.create_index(
         op.f("ix_fundamentals_market_cap_eur"),
         "fundamentals",
         ["market_cap_eur"],
         unique=False,
         schema=SCHEMA,
     )
-    op.create_index(
-        op.f("ix_fundamentals_pe_ttm"), "fundamentals", ["pe_ttm"], unique=False, schema=SCHEMA
-    )
     op.create_table(
         "price_history",
         sa.Column("security_id", sa.Integer(), nullable=False),
         sa.Column("day", sa.Date(), nullable=False),
-        sa.Column("close", sa.Numeric(precision=20, scale=6), nullable=False),
-        sa.Column("adj_close", sa.Numeric(precision=20, scale=6), nullable=True),
+        sa.Column("close", sa.Double(), nullable=False),
         sa.ForeignKeyConstraint(
             ["security_id"],
             [f"{SCHEMA}.securities.id"],
@@ -170,10 +185,8 @@ def upgrade() -> None:
     op.create_table(
         "quotes",
         sa.Column("security_id", sa.Integer(), nullable=False),
-        sa.Column("price", sa.Numeric(precision=20, scale=6), nullable=True),
-        sa.Column("previous_close", sa.Numeric(precision=20, scale=6), nullable=True),
-        sa.Column("change_pct", sa.Double(), nullable=True),
-        sa.Column("currency", sa.String(length=3), nullable=True),
+        sa.Column("price", sa.Double(), nullable=True),
+        sa.Column("previous_close", sa.Double(), nullable=True),
         sa.Column("as_of", sa.DateTime(timezone=True), nullable=True),
         sa.Column(
             "updated_at",
@@ -226,6 +239,69 @@ def upgrade() -> None:
         "transactions",
         ["security_id", "trade_date"],
         unique=False,
+        schema=SCHEMA,
+    )
+    op.create_table(
+        "valuations",
+        sa.Column("security_id", sa.Integer(), nullable=False),
+        sa.Column("dividend_ttm", sa.Double(), nullable=True),
+        sa.Column("dividend_forward", sa.Double(), nullable=True),
+        sa.Column("dividend_last_year", sa.Double(), nullable=True),
+        sa.Column("dgr_5y", sa.Double(), nullable=True),
+        sa.Column("dgr_10y", sa.Double(), nullable=True),
+        sa.Column("growth_used", sa.Double(), nullable=True),
+        sa.Column("years_no_cut", sa.Integer(), nullable=True),
+        sa.Column("years_growth", sa.Integer(), nullable=True),
+        sa.Column("yield_avg_5y", sa.Double(), nullable=True),
+        sa.Column("yield_p80_5y", sa.Double(), nullable=True),
+        sa.Column("yield_avg_10y", sa.Double(), nullable=True),
+        sa.Column("yield_p80_10y", sa.Double(), nullable=True),
+        sa.Column("pe_avg", sa.Double(), nullable=True),
+        sa.Column("pe_years", sa.Integer(), nullable=True),
+        sa.Column("payout_fcf", sa.Double(), nullable=True),
+        sa.Column("payout_ocf", sa.Double(), nullable=True),
+        sa.Column("fv_yield", sa.Double(), nullable=True),
+        sa.Column("buy_yield", sa.Double(), nullable=True),
+        sa.Column("fv_pe", sa.Double(), nullable=True),
+        sa.Column("fv_chowder", sa.Double(), nullable=True),
+        sa.Column("chowder_threshold", sa.Double(), nullable=True),
+        sa.Column("fv_gordon", sa.Double(), nullable=True),
+        sa.Column("max_price_target", sa.Double(), nullable=True),
+        sa.Column("fair_value", sa.Double(), nullable=True),
+        sa.Column("buy_price", sa.Double(), nullable=True),
+        sa.Column("quality_ok", sa.Boolean(), nullable=True),
+        sa.Column("flags", sa.ARRAY(sa.String(length=64)), server_default="{}", nullable=False),
+        sa.Column(
+            "computed_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.ForeignKeyConstraint(
+            ["security_id"],
+            [f"{SCHEMA}.securities.id"],
+            name=op.f("fk_valuations_security_id_securities"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("security_id", name=op.f("pk_valuations")),
+        schema=SCHEMA,
+    )
+    op.create_table(
+        "watchlist",
+        sa.Column("security_id", sa.Integer(), nullable=False),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("margin_of_safety", sa.Double(), nullable=True),
+        sa.Column("target_total_return", sa.Double(), nullable=True),
+        sa.Column(
+            "added_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+        ),
+        sa.ForeignKeyConstraint(
+            ["security_id"],
+            [f"{SCHEMA}.securities.id"],
+            name=op.f("fk_watchlist_security_id_securities"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("security_id", name=op.f("pk_watchlist")),
         schema=SCHEMA,
     )
     op.create_table(
@@ -299,19 +375,21 @@ def downgrade() -> None:
         op.f("ix_dividend_payments_pay_date"), table_name="dividend_payments", schema=SCHEMA
     )
     op.drop_table("dividend_payments", schema=SCHEMA)
+    op.drop_table("watchlist", schema=SCHEMA)
+    op.drop_table("valuations", schema=SCHEMA)
     op.drop_index(
         op.f("ix_transactions_security_id_trade_date"), table_name="transactions", schema=SCHEMA
     )
     op.drop_table("transactions", schema=SCHEMA)
     op.drop_table("quotes", schema=SCHEMA)
     op.drop_table("price_history", schema=SCHEMA)
-    op.drop_index(op.f("ix_fundamentals_pe_ttm"), table_name="fundamentals", schema=SCHEMA)
     op.drop_index(op.f("ix_fundamentals_market_cap_eur"), table_name="fundamentals", schema=SCHEMA)
-    op.drop_index(op.f("ix_fundamentals_dividend_yield"), table_name="fundamentals", schema=SCHEMA)
     op.drop_table("fundamentals", schema=SCHEMA)
+    op.drop_table("financials_annual", schema=SCHEMA)
     op.drop_table("dividend_events", schema=SCHEMA)
     op.drop_table("users", schema=SCHEMA)
     op.drop_index(op.f("ix_securities_sector"), table_name="securities", schema=SCHEMA)
+    op.drop_index(op.f("ix_securities_region"), table_name="securities", schema=SCHEMA)
     op.drop_index(op.f("ix_securities_isin"), table_name="securities", schema=SCHEMA)
     op.drop_index(op.f("ix_securities_country"), table_name="securities", schema=SCHEMA)
     op.drop_table("securities", schema=SCHEMA)

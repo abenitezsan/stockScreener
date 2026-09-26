@@ -1,4 +1,6 @@
+from datetime import date, datetime
 from functools import lru_cache
+from zoneinfo import ZoneInfo
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -10,8 +12,25 @@ class Settings(BaseSettings):
     db_schema: str = "stockscreener"
     base_currency: str = "EUR"
     secret_key: str = "dev-insecure"
+    timezone: str = "Europe/Madrid"
+
+    # Valoración (ver docs/valoracion.md)
+    valuation_window_years: int = 5
+    margin_of_safety: float = 0.10
+    target_total_return: float = 0.05
+    gordon_discount_rate: float = 0.08
+    growth_cap: float = 0.05
+
+    # Descarga de datos
+    request_delay: float = 1.0  # segundos entre peticiones individuales a Yahoo
+    batch_size: int = 50  # símbolos por descarga masiva
+    scheduler_enabled: bool = True
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def today() -> date:
+    return datetime.now(ZoneInfo(get_settings().timezone)).date()

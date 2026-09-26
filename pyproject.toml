@@ -13,12 +13,13 @@ dependencies = [
     "alembic>=1.13",
     "pydantic-settings>=2.4",
     "apscheduler>=3.10,<4",
-    "yfinance>=0.2.50",
+    "yfinance>=0.2.54",
     "pandas>=2.2",
+    "lxml>=5.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "httpx2"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

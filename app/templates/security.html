@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}{{ sec.symbol }} · Stock Screener{% endblock %}
+{% block head %}<script src="{{ url_for('static', path='vendor/chart-4.4.4.umd.min.js') }}" defer></script>{% endblock %}
+{% block content %}
+{% set v = row.valuation %}{% set f = row.fundamentals %}{% set p = row.price %}
+<hgroup>
+  <h2>{% with id=sec.id, watched=watched %}{% include "_watch_button.html" %}{% endwith %} {{ sec.symbol }} · {{ sec.name or '' }}</h2>
+  <p>{{ sec.sector or '–' }} · {{ sec.industry or '–' }} · {{ sec.country or '–' }} · {{ sec.currency or '' }} · {% with signal=row.signal %}{% include "_signal.html" %}{% endwith %}</p>
+</hgroup>
+
+<div class="cards">
+  {% macro card(label, value) %}<article><div class="label">{{ label }}</div><div class="value">{{ value }}</div></article>{% endmacro %}
+  {{ card('Precio', p | fmt) }}
+  {{ card('Precio de compra', row.buy_price | fmt) }}
+  {{ card('Precio justo', (v.fair_value if v) | fmt) }}
+  {{ card('Yield actual', row.ratio(v.dividend_ttm if v) | fmt('pct')) }}
+  {{ card('Yield estimada', row.ratio(v.dividend_forward if v) | fmt('pct')) }}
+  {{ card('Rent. total estimada', ((row.ratio(v.dividend_forward) or 0) + v.growth_used if v and v.dividend_forward else none) | fmt('pct')) }}
+  {{ card('Crec. dividendo 5a', (v.dgr_5y if v) | fmt('pct')) }}
+  {{ card('Años sin recorte', (v.years_no_cut if v) | fmt('int')) }}
+</div>
+
+<div class="grid">
+<section>
+  <h4>Valoración</h4>
+  <table class="wrap">
+    <thead><tr><th>Método</th><th class="num">Precio</th><th>Detalle</th></tr></thead>
+    <tbody>
+      <tr><td>1. Banda de yield</td><td class="num">{{ (v.fv_yield if v) | fmt }}</td>
+          <td class="muted">Dividendo {{ (v.dividend_ttm if v) | fmt }} ÷ yield media {{ (v.yield_avg_5y if v) | fmt('pct') }}. Referencia de compra (p80 {{ (v.yield_p80_5y if v) | fmt('pct') }}): {{ (v.buy_yield if v) | fmt }}</td></tr>
+      <tr><td>2. PER histórico</td><td class="num">{{ (v.fv_pe if v) | fmt }}</td>
+          <td class="muted">PER medio {{ (v.pe_avg if v) | fmt('x') }} ({{ (v.pe_years if v) | fmt('int') }} años) × BPA estimado {{ (f.eps_forward if f) | fmt }}</td></tr>
+      <tr><td>3. Chowder</td><td class="num">{{ (v.fv_chowder if v) | fmt }}</td>
+          <td class="muted">Dividendo ÷ (umbral {{ (v.chowder_threshold if v) | fmt('pct') }} − crec. {{ (v.dgr_5y if v) | fmt('pct') }})</td></tr>
+      <tr><td>5. Gordon</td><td class="num">{{ (v.fv_gordon if v) | fmt }}</td>
+          <td class="muted">{% if v and v.fv_gordon %}D₁ {{ v.dividend_forward | fmt }} ÷ ({{ settings.gordon_discount_rate | fmt('pct') }} − {{ v.growth_used | fmt('pct') }}){% else %}Solo sectores estables{% endif %}</td></tr>
+      <tr><td><strong>Precio justo (mediana)</strong></td><td class="num"><strong>{{ (v.fair_value if v) | fmt }}</strong></td><td></td></tr>
+      <tr><td>Con margen de seguridad {{ row.margin_of_safety | fmt('pct') }}</td><td class="num">{{ (v.fair_value * (1 - row.margin_of_safety) if v and v.fair_value) | fmt }}</td><td></td></tr>
+      <tr><td>4. Máximo para rent. {{ row.target_total_return | fmt('pct') }}</td><td class="num">{{ row.max_price_target | fmt }}</td>
+          <td class="muted">{% if row.max_price_target %}D₁ ÷ (objetivo − crec. {{ v.growth_used | fmt('pct') }}){% else %}El crecimiento ya cubre el objetivo: sin límite{% endif %}</td></tr>
+      <tr><td><strong>Precio de compra</strong></td><td class="num"><strong>{{ row.buy_price | fmt }}</strong></td><td></td></tr>
+    </tbody>
+  </table>
+</section>
+<section>
+  <h4>Sostenibilidad del dividendo</h4>
+  <table>
+    <tbody>
+      <tr><td>Grupo de sector</td><td class="num">{{ GROUP_LABELS.get(sec.sector_group, '–') }}</td></tr>
+      <tr><td>Payout sobre beneficios</td><td class="num">{{ (f.payout_ratio if f) | fmt('pct') }}</td></tr>
+      <tr><td>Payout sobre FCF</td><td class="num">{{ (v.payout_fcf if v) | fmt('pct') }}</td></tr>
+      <tr><td>Payout sobre flujo operativo</td><td class="num">{{ (v.payout_ocf if v) | fmt('pct') }}</td></tr>
+      <tr><td>Años subiendo el dividendo</td><td class="num">{{ (v.years_growth if v) | fmt('int') }}</td></tr>
+      <tr><td>Crec. dividendo 10a</td><td class="num">{{ (v.dgr_10y if v) | fmt('pct') }}</td></tr>
+      <tr><td>Deuda / patrimonio</td><td class="num">{{ ((f.debt_to_equity / 100) if f and f.debt_to_equity is not none) | fmt('pct') }}</td></tr>
+      <tr><td>Rango 52 semanas</td><td class="num">{{ (f.week52_low if f) | fmt }} – {{ (f.week52_high if f) | fmt }} ({{ row.range_52w | fmt('pct') }})</td></tr>
+      <tr><td>vs. media 200 días</td><td class="num">{{ row.vs_ma200 | fmt('pct') }}</td></tr>
+      <tr><td>Precio objetivo analistas</td><td class="num">{{ (f.target_mean_price if f) | fmt }}</td></tr>
+    </tbody>
+  </table>
+  <p>{% with flags=v.flags if v else [] %}{% include "_flags.html" %}{% endwith %}{% if v and v.quality_ok %}<span class="signal green">✓ Dividendo sostenible</span>{% endif %}</p>
+</section>
+</div>
+
+<div class="charts">
+  <article><h6>Precio (2 años, semanal)</h6><div class="chart"><canvas id="chart-price" aria-label="Precio de los últimos 2 años con precio justo y de compra"></canvas></div></article>
+  <article><h6>Yield por dividendo (%)</h6><div class="chart"><canvas id="chart-yield" aria-label="Yield histórica con su media y percentil 80"></canvas></div></article>
+  <article><h6>Dividendo por año ({{ sec.currency or '' }})</h6><div class="chart"><canvas id="chart-div" aria-label="Dividendo ordinario por año"></canvas></div></article>
+</div>
+<details>
+  <summary>Dividendo por año (tabla)</summary>
+  <table><tbody>{% for year, amount in chart_data.annual | reverse %}<tr><td>{{ year }}</td><td class="num">{{ amount | fmt }}</td></tr>{% endfor %}</tbody></table>
+</details>
+
+<section>
+  <h4>Seguimiento</h4>
+  <form method="post" action="/security/{{ sec.symbol }}/watch" class="grid">
+    <label>Margen de seguridad (%)<input type="number" step="any" name="margin_of_safety" value="{{ (row.item.margin_of_safety * 100) if row.item.margin_of_safety is not none else '' }}" placeholder="{{ settings.margin_of_safety * 100 }}"></label>
+    <label>Rentabilidad total objetivo (%)<input type="number" step="any" name="target_total_return" value="{{ (row.item.target_total_return * 100) if row.item.target_total_return is not none else '' }}" placeholder="{{ settings.target_total_return * 100 }}"></label>
+    <label>Notas<input type="text" name="notes" value="{{ row.item.notes or '' }}"></label>
+    <button type="submit">{{ 'Guardar' if watched else 'Guardar y seguir' }}</button>
+  </form>
+</section>
+<p class="muted"><small>Valoración calculada: {{ v.computed_at.strftime('%d/%m/%Y %H:%M') if v else '–' }} · Cotización: {{ row.quote.as_of.strftime('%d/%m/%Y') if row.quote and row.quote.as_of else '–' }}</small></p>
+
+<script type="application/json" id="chart-data">{{ chart_data | tojson }}</script>
+<script src="{{ url_for('static', path='charts.js') }}" defer></script>
+{% endblock %}

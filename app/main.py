@@ -1,30 +1,38 @@
+import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
 
-from fastapi import Depends, FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
-from sqlalchemy.orm import Session
 
-from app.db import get_session
+from app.config import get_settings
+from app.db import SessionLocal
+from app.web import router
 
-DbSession = Annotated[Session, Depends(get_session)]
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-BASE_DIR = Path(__file__).parent
 
-app = FastAPI(title="Stock Screener", docs_url=None, redoc_url=None)
-app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
-templates = Jinja2Templates(directory=BASE_DIR / "templates")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler = None
+    if get_settings().scheduler_enabled:
+        from app.scheduler import create_scheduler
+
+        scheduler = create_scheduler()
+        scheduler.start()
+    yield
+    if scheduler:
+        scheduler.shutdown(wait=False)
+
+
+app = FastAPI(title="Stock Screener", docs_url=None, redoc_url=None, lifespan=lifespan)
+app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+app.include_router(router)
 
 
 @app.get("/health")
-def health(session: DbSession) -> dict:
-    session.execute(text("SELECT 1"))
+def health() -> dict:
+    with SessionLocal() as session:
+        session.execute(text("SELECT 1"))
     return {"status": "ok"}
-
-
-@app.get("/", response_class=HTMLResponse)
-def index(request: Request):
-    return templates.TemplateResponse(request, "index.html")

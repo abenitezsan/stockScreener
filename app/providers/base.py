@@ -2,9 +2,13 @@
 
 El resto de la aplicación solo depende de esta interfaz, de modo que Yahoo se puede
 sustituir por otro proveedor (EODHD, FMP…) sin tocar el screener ni la cartera.
+
+Unidades: `QuoteData` e `HistoryData` se devuelven tal como cotiza el valor (p. ej. peniques
+para GBp); quien los guarda los normaliza con `Security.price_currency`. `ProfileData` ya viene
+normalizado a la divisa ISO.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Protocol
 
@@ -14,16 +18,14 @@ class QuoteData:
     symbol: str
     price: float | None
     previous_close: float | None
-    currency: str | None
     as_of: datetime | None
 
 
 @dataclass(slots=True)
-class DividendData:
+class HistoryData:
     symbol: str
-    ex_date: date
-    amount: float
-    currency: str | None
+    weekly_closes: list[tuple[date, float]] = field(default_factory=list)
+    dividends: list[tuple[date, float]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -32,22 +34,37 @@ class ProfileData:
 
     symbol: str
     name: str | None = None
-    isin: str | None = None
     exchange: str | None = None
     country: str | None = None
     currency: str | None = None  # ISO (GBP)
     price_currency: str | None = None  # tal como cotiza en Yahoo (GBp = peniques)
+    financial_currency: str | None = None
     sector: str | None = None
     industry: str | None = None
-    market_cap: float | None = None  # en `currency`
-    metrics: dict[str, float | None] | None = None
+    quote_type: str | None = None  # EQUITY, ETF…
+    metrics: dict[str, float | None] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class FinancialsData:
+    period_end: date
+    revenue: float | None = None
+    net_income: float | None = None
+    eps: float | None = None
+    operating_cashflow: float | None = None
+    capex: float | None = None
+    free_cashflow: float | None = None
+    dividends_paid: float | None = None
+    shares: float | None = None
 
 
 class MarketDataProvider(Protocol):
     def get_quotes(self, symbols: list[str]) -> list[QuoteData]: ...
 
+    def get_history(self, symbols: list[str], period: str) -> list[HistoryData]: ...
+
     def get_profile(self, symbol: str) -> ProfileData: ...
 
-    def get_dividends(self, symbol: str, since: date | None = None) -> list[DividendData]: ...
+    def get_financials(self, symbol: str) -> list[FinancialsData]: ...
 
     def get_fx_rates(self, currencies: list[str], base: str) -> dict[str, float]: ...

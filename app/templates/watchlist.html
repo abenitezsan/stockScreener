@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Seguimiento · Stock Screener{% endblock %}
+{% block content %}
+<h2>Seguimiento</h2>
+<p class="muted">Valores marcados con ☆ en el screener. El precio de compra usa el margen de seguridad y la rentabilidad objetivo de cada valor (se cambian en su ficha).</p>
+<div class="overflow-auto">
+<table class="striped">
+  <thead><tr>
+    <th></th><th>Ticker</th><th>Empresa</th><th>Semáforo</th>
+    <th class="num">Precio</th><th class="num">Precio compra</th><th class="num">Precio justo</th>
+    <th class="num">Sobre precio compra</th><th class="num">Yield</th><th class="num">Yield media 5a</th>
+    <th class="num">Banda yield (p80)</th><th class="num">PER / medio</th><th class="num">Crec. div. 5a</th>
+    <th class="num">Rango 52 sem.</th><th class="num">vs. media 200 d</th><th>Avisos</th><th>Notas</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}{% set v = r.valuation %}{% set f = r.fundamentals %}
+    <tr>
+      <td>{% with id=r.security.id, watched=True %}{% include "_watch_button.html" %}{% endwith %}</td>
+      <td><a href="/security/{{ r.security.symbol }}">{{ r.security.symbol }}</a></td>
+      <td class="name" title="{{ r.security.name or '' }}">{{ r.security.name or '–' }}</td>
+      <td>{% with signal=r.signal %}{% include "_signal.html" %}{% endwith %}</td>
+      <td class="num">{{ r.price | fmt }}</td>
+      <td class="num"><strong>{{ r.buy_price | fmt }}</strong></td>
+      <td class="num">{{ (v.fair_value if v) | fmt }}</td>
+      <td class="num">{{ ((r.price / r.buy_price - 1) if r.price and r.buy_price) | fmt('pct') }}</td>
+      <td class="num">{{ r.ratio(v.dividend_ttm if v) | fmt('pct') }}</td>
+      <td class="num">{{ (v.yield_avg_5y if v) | fmt('pct') }}</td>
+      <td class="num">{{ (v.yield_p80_5y if v) | fmt('pct') }}</td>
+      <td class="num">{{ (r.price / f.eps_ttm if f and f.eps_ttm and f.eps_ttm > 0 and r.price) | fmt('x') }} / {{ (v.pe_avg if v) | fmt('x') }}</td>
+      <td class="num">{{ (v.dgr_5y if v) | fmt('pct') }}</td>
+      <td class="num">{{ r.range_52w | fmt('pct') }}</td>
+      <td class="num">{{ r.vs_ma200 | fmt('pct') }}</td>
+      <td>{% with flags=v.flags if v else [] %}{% include "_flags.html" %}{% endwith %}</td>
+      <td class="name" title="{{ r.item.notes or '' }}">{{ r.item.notes or '' }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="17">Aún no sigues ningún valor. Márcalos con ☆ en el <a href="/screener">screener</a>.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted"><small>Sobre precio compra: cuánto está el precio por encima del precio de compra (negativo = ya está en zona de compra). Rango 52 sem.: 0 % = mínimo anual, 100 % = máximo.</small></p>
+{% endblock %}

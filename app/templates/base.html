@@ -4,19 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Stock Screener{% endblock %}</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="{{ url_for('static', path='vendor/pico-2.0.6.min.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
-  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3/dist/cdn.min.js" defer></script>
+  <script src="{{ url_for('static', path='vendor/htmx-2.0.4.min.js') }}" defer></script>
+  <script src="{{ url_for('static', path='app.js') }}" defer></script>
+  {% block head %}{% endblock %}
 </head>
 <body>
   <header class="container">
     <nav>
       <ul><li><strong>Stock Screener</strong></li></ul>
       <ul>
-        <li><a href="/">Screener</a></li>
+        <li><a href="/screener">Screener</a></li>
+        <li><a href="/watchlist">Seguimiento</a></li>
         <li><a href="/portfolio">Cartera</a></li>
-        <li><a href="/dividends">Dividendos</a></li>
       </ul>
     </nav>
   </header>
