@@ -67,9 +67,10 @@ los tests en cada push. Si todo pasa, publica la imagen en Docker Hub para
 
 ### 2. Arrancar en el VPS
 
-En el VPS la app va detrás del nginx de tabbito, bajo `http://<IP>/stockscreener/`, con usuario
-y contraseña. Los pasos, con los cambios necesarios en el `docker-compose.prod.yml` y el
-`tabbito.conf` de tabbito, están en **[deploy/README.md](deploy/README.md)**.
+En el VPS, un proxy de entrada independiente ([`deploy/edge/`](deploy/edge)) es el único
+contenedor que publica el puerto 80. Reparte `/tabbito/` y `/stockscreener/` (esta última con
+usuario y contraseña) entre las apps, cada una en su propio proyecto de Docker Compose. Los
+pasos de la migración están en **[deploy/README.md](deploy/README.md)**.
 
 La imagen corre como usuario sin privilegios, tiene healthcheck en `/health` y aplica
 `alembic upgrade head` al arrancar (se desactiva con `RUN_MIGRATIONS=false`).

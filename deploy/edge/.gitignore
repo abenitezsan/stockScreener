@@ -1,0 +1,4 @@
+htpasswd/*
+!htpasswd/.gitkeep
+logs/*
+!logs/.gitkeep

@@ -1,0 +1,35 @@
+# Proxy de entrada del VPS: el único contenedor que publica el puerto 80.
+# Reparte por ruta entre las apps, cada una en su propio proyecto de Docker Compose:
+#   /tabbito/        -> tabbito (red de tabbito)
+#   /stockscreener/  -> stockscreener (red stockscreener-net)
+#
+# Arranca después de las apps (sus redes tienen que existir):
+#   docker compose up -d
+name: edge
+
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      # Directorio completo (no ficheros sueltos): los cambios se ven con un simple reload
+      - ./conf.d:/etc/nginx/conf.d:ro
+      - ./htpasswd:/etc/nginx/htpasswd:ro
+      - ./logs:/var/log/nginx
+    networks:
+      - tabbito
+      - stockscreener
+    cpus: "0.25"
+    mem_limit: "128m"
+
+networks:
+  # Redes creadas por los proyectos de cada app; aquí solo se referencian
+  tabbito:
+    external: true
+    # <proyecto>_tabbito-net; compruébalo con `docker network ls`
+    name: ${TABBITO_NETWORK:-tabbito_tabbito-net}
+  stockscreener:
+    external: true
+    name: stockscreener-net

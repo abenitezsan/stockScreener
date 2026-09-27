@@ -1,101 +1,126 @@
-# Despliegue en el VPS junto a tabbito
+# Despliegue en el VPS: proxy de entrada + tabbito + stockscreener
 
-El VPS solo expone el puerto 80, y ese puerto ya lo tiene el nginx del proyecto tabbito. La
-app no publica ningún puerto: nginx le reenvía `http://<IP>/stockscreener/` a través de una red
-Docker compartida llamada `web`.
+El VPS solo expone el puerto 80. En lugar de que el nginx de tabbito haga también de proxy de
+las demás apps, hay un **proxy de entrada independiente** (`edge`) en su propia carpeta. Es el
+único contenedor que publica el puerto 80, y se conecta a la red de cada app:
 
 ```
-internet :80 ──► nginx (tabbito) ──┬─ /tabbito/        ──► app:8080       (red tabbito-net)
-                                   └─ /stockscreener/  ──► stockscreener:8000 (red web)
+                         ┌─ /tabbito/        ──► app:8080            (red tabbito_tabbito-net)
+internet :80 ──► edge ───┤
+                         └─ /stockscreener/  ──► stockscreener:8000  (red stockscreener-net)
 ```
 
-- **tabbito no depende de esta app.** nginx resuelve `stockscreener` en cada petición, así que
-  arranca y sirve `/tabbito/` aunque el screener esté parado (en ese caso `/stockscreener/`
-  devuelve 502).
-- **La app no tiene login propio.** nginx la protege con usuario y contraseña (auth básica).
-  Ten en cuenta que por HTTP la contraseña viaja sin cifrar.
+Cada app sigue siendo un proyecto de Docker Compose independiente, sin puertos publicados. Se
+pueden actualizar, parar o reiniciar por separado:
 
-## 1. Red compartida (una vez)
+- Si una app está caída, solo su ruta devuelve 502. El proxy resuelve los nombres en cada
+  petición, así que arranca aunque falte alguna app.
+- Un `docker compose down` de una app no rompe la conexión: Docker conserva su red mientras
+  el proxy esté conectado, y al volver a levantarla la reutiliza.
 
-```bash
-docker network create web
+## Estructura en el VPS
+
+```
+/home/debian/
+├── tabbito/                 # como ahora, pero sin el servicio nginx
+├── stockscreener/
+│   ├── docker-compose.yml   # ../docker-compose.yml de este repositorio
+│   └── .env                 # opcional (ver ../.env.example)
+└── edge/                    # copia de deploy/edge/ de este repositorio
+    ├── docker-compose.yml
+    ├── conf.d/default.conf  # rutas de las dos apps
+    ├── htpasswd/            # contraseñas (auth básica)
+    └── logs/                # access.log / error.log de nginx
 ```
 
-## 2. Cambios en tabbito
+## Migración paso a paso
 
-### `docker-compose.prod.yml`
+El corte de tabbito dura solo unos segundos, entre los pasos 4 y 5.
 
-Al servicio `nginx` se le añaden la red `web` y el fichero de contraseñas. Al final del
-fichero se declara la red `web` como externa:
+### 1. Arrancar stockscreener
 
-```yaml
-  nginx:
-    # ... igual que ahora ...
-    volumes:
-      - /home/debian/tabbito/nginx/tabbito.conf:/etc/nginx/conf.d/default.conf:ro
-      - /home/debian/tabbito/nginx/logs:/var/log/nginx
-      - /home/debian/tabbito/nginx/stockscreener.htpasswd:/etc/nginx/stockscreener.htpasswd:ro   # nuevo
-    networks:
-      - tabbito-net
-      - web                                                                                        # nuevo
-
-networks:
-  tabbito-net:
-  web:                  # nuevo
-    external: true      # nuevo
-```
-
-### `tabbito.conf`
-
-Pega el contenido de [`nginx-stockscreener.conf`](nginx-stockscreener.conf) **dentro** del
-bloque `server { ... }`, después de la `location /tabbito/`.
-
-### Usuario y contraseña
-
-```bash
-docker run --rm httpd:2.4-alpine htpasswd -nbB TU_USUARIO 'TU_CONTRASEÑA' \
-  > /home/debian/tabbito/nginx/stockscreener.htpasswd
-```
-
-### Aplicar los cambios
-
-```bash
-cd <directorio de tabbito>
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d nginx
-```
-
-Con esto se recrea solo el contenedor de nginx; la app y la base de datos de tabbito no se
-tocan. `/tabbito/` sigue funcionando y `/stockscreener/` devuelve 502 hasta el paso 3.
-
-> **Ojo al editar `tabbito.conf` más adelante.** Está montado como fichero suelto. Muchos
-> editores (y `sed -i`) guardan creando un fichero nuevo, y el contenedor sigue viendo el
-> antiguo: un `nginx -s reload` no recoge el cambio. Usa
-> `docker compose -f docker-compose.prod.yml restart nginx`.
-> Antes, comprueba la sintaxis con
-> `docker compose -f docker-compose.prod.yml exec nginx nginx -t`.
-
-## 3. Arrancar stockscreener
-
-En un directorio nuevo, por ejemplo `/home/debian/stockscreener`, copia el
-[`docker-compose.yml`](../docker-compose.yml) del repositorio. Opcionalmente, crea un `.env`
-(ver [`.env.example`](../.env.example)):
+Crea `/home/debian/stockscreener/` con el `docker-compose.yml` del repositorio y ejecuta:
 
 ```bash
 cd /home/debian/stockscreener
-docker compose pull && docker compose up -d
+docker compose pull && docker compose up -d        # crea la red stockscreener-net
+```
+
+### 2. Preparar el proxy
+
+```bash
+mkdir -p /home/debian/edge && cp -r deploy/edge/. /home/debian/edge/    # desde un clon del repo
+cd /home/debian/edge
+docker run --rm httpd:2.4-alpine htpasswd -nbB TU_USUARIO 'TU_CONTRASEÑA' > htpasswd/stockscreener
+```
+
+### 3. Comprobar el nombre de la red de tabbito
+
+```bash
+docker network ls | grep tabbito
+```
+
+Por defecto se espera `tabbito_tabbito-net`: el proyecto de Compose toma el nombre del
+directorio del `docker-compose.prod.yml`. Si el nombre es otro, créate en `edge/` un `.env` con:
+
+```bash
+TABBITO_NETWORK=<nombre que aparezca>
+```
+
+### 4. Quitar el nginx de tabbito
+
+En `docker-compose.prod.yml` de tabbito, **borra el servicio `nginx` completo**. No cambia nada
+más: la app, la base de datos, `tabbito-net` y `ADMIN_BASE_URL` siguen igual, porque la ruta
+pública sigue siendo `/tabbito/`. El `tabbito.conf` deja de usarse; sus reglas están ahora en
+`edge/conf.d/default.conf`.
+
+```bash
+cd <directorio de tabbito>
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --remove-orphans
+```
+
+`--remove-orphans` elimina el contenedor de nginx que ya no está en el fichero y libera el
+puerto 80. La app y la base de datos de tabbito no se reinician.
+
+### 5. Arrancar el proxy
+
+```bash
+cd /home/debian/edge
+docker compose up -d
+```
+
+Comprueba:
+- `http://<IP>/tabbito/` → el admin de tabbito, igual que antes.
+- `http://<IP>/stockscreener/` → pide usuario y contraseña, y muestra el screener.
+
+### 6. Carga inicial de datos del screener
+
+```bash
+cd /home/debian/stockscreener
 docker compose exec stockscreener python -m app.cli universe
 docker compose exec stockscreener python -m app.cli refresh bootstrap    # ~1 hora
 ```
 
-Abre `http://<IP>/stockscreener/` e introduce el usuario y la contraseña del paso 2.
-
 ## Operación
 
-| Tarea | Comando (en el directorio de stockscreener) |
-|---|---|
-| Actualizar a la última imagen | `docker compose pull && docker compose up -d` |
-| Ver logs | `docker compose logs -f` |
-| Copia de seguridad | `docker compose exec stockscreener python -m app.cli backup /data/backup.db && docker compose cp stockscreener:/data/backup.db ./backup-$(date +%F).db` |
-| Parar (conserva los datos) | `docker compose down` |
+| Tarea | Dónde | Comando |
+|---|---|---|
+| Actualizar stockscreener | `stockscreener/` | `docker compose pull && docker compose up -d` |
+| Copia de seguridad del screener | `stockscreener/` | `docker compose exec stockscreener python -m app.cli backup /data/backup.db && docker compose cp stockscreener:/data/backup.db ./backup-$(date +%F).db` |
+| Cambiar la configuración de nginx | `edge/` | edita `conf.d/default.conf`, luego `docker compose exec nginx nginx -t && docker compose exec nginx nginx -s reload` |
+| Cambiar la contraseña | `edge/` | vuelve a generar `htpasswd/stockscreener` (paso 2); no hace falta reiniciar |
+| Ver peticiones | `edge/` | `tail -f logs/access.log` |
 
-Actualizar o parar stockscreener no afecta a tabbito, y al revés.
+Para añadir otra app en el futuro:
+1. Dale a su red un nombre fijo en su `docker-compose.yml`.
+2. Añade esa red como `external` en `edge/docker-compose.yml`.
+3. Añade su `location` en `conf.d/default.conf`.
+4. Ejecuta `docker compose up -d` en `edge/`.
+
+## Notas
+
+- **Plain HTTP.** Por HTTP, la contraseña del screener viaja sin cifrar. Cuando quieras HTTPS,
+  solo hay que tocar `edge/`; las apps no cambian.
+- **Nombre `app`.** En `default.conf`, tabbito se alcanza como `app` (el nombre de su servicio).
+  Si alguna vez añades al proxy otra red con un servicio que también se llame `app`, usa en su
+  lugar el nombre del contenedor (`tabbito-app-1`).

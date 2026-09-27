@@ -1,9 +1,7 @@
-# Despliegue en el VPS, detrás del nginx que ya expone el puerto 80 (proyecto tabbito).
+# Despliegue en el VPS, detrás del proxy de entrada (deploy/edge), que es el único que
+# publica el puerto 80 y reenvía /stockscreener/ por la red "stockscreener-net".
+# Pasos completos en deploy/README.md.
 #
-# No publica ningún puerto: se une a la red Docker compartida "web", por la que el nginx
-# existente le reenvía /stockscreener/. Pasos completos en deploy/README.md.
-#
-#   docker network create web          # una sola vez
 #   docker compose pull && docker compose up -d
 #
 # La base de datos es un fichero SQLite en el volumen "stockscreener-data" (/data), que se
@@ -25,7 +23,7 @@ services:
     volumes:
       - stockscreener-data:/data
     networks:
-      - web
+      - stockscreener-net
     # Mismo estilo de límites que tabbito; la app usa ~150-250 MB
     cpus: "0.5"
     mem_limit: "512m"
@@ -37,5 +35,6 @@ volumes:
   stockscreener-data:
 
 networks:
-  web:
-    external: true
+  # Nombre fijo para que el proxy de entrada pueda referenciarla
+  stockscreener-net:
+    name: stockscreener-net
