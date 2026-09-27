@@ -1,24 +1,16 @@
-"""Flujo completo contra Postgres: universo -> tareas -> screener -> páginas.
-
-Requiere TEST_DATABASE_URL (una base de datos desechable); si no está, se omite.
-"""
+"""Flujo completo contra SQLite: universo -> tareas -> screener -> páginas."""
 
 import os
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    "TEST_DATABASE_URL" not in os.environ, reason="TEST_DATABASE_URL no configurada"
-)
-
 
 @pytest.fixture(scope="module")
-def client():
-    os.environ["DATABASE_URL"] = os.environ["TEST_DATABASE_URL"]
+def client(tmp_path_factory):
+    db_path = tmp_path_factory.mktemp("db") / "test.db"
+    os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
     os.environ["SCHEDULER_ENABLED"] = "false"
     os.environ["REQUEST_DELAY"] = "0"
-    from sqlalchemy import text
-
     from app.config import get_settings
 
     get_settings.cache_clear()
@@ -30,10 +22,7 @@ def client():
     from app.models import Base
     from tests.fake_provider import SPECS, FakeProvider
 
-    schema = get_settings().db_schema
-    with engine.begin() as conn:
-        conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
-        conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+    assert str(db_path) in str(engine.url)
     Base.metadata.create_all(engine)
 
     provider = FakeProvider()
@@ -113,3 +102,23 @@ def test_watchlist_and_detail(client):
     assert "Esperar" in detail.text and 'value="20.0"' in detail.text
     assert client.get("/security/NOPE").status_code == 404
     assert client.get("/portfolio").status_code == 200
+
+
+def test_universe_tags(client):
+    from sqlalchemy import select
+
+    from app import universe
+    from app.db import SessionLocal
+    from app.models import Security
+
+    with SessionLocal() as s:
+        universe.upsert_universe(s, "IDX", ["AAA", "bbb.mc"])
+        universe.upsert_universe(s, universe.MANUAL, ["AAA"])
+        universe.upsert_universe(s, "IDX", ["BBB.MC"])  # AAA sale del índice
+        aaa = s.scalar(select(Security).where(Security.symbol == "AAA"))
+        assert set(aaa.universes) == {"TEST", "manual"} and aaa.active
+        universe.upsert_universe(s, "TEST", [])
+        ddd = s.scalar(select(Security).where(Security.symbol == "DDD"))
+        assert ddd.universes == [] and ddd.active is False
+        s.refresh(aaa)
+        assert aaa.universes == ["manual"] and aaa.active

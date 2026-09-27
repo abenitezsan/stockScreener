@@ -8,3 +8,5 @@
 tests
 docs
 *.md
+data
+*.db

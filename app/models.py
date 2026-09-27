@@ -1,10 +1,10 @@
-"""Modelo de datos. Todas las tablas viven en el esquema configurado (DB_SCHEMA)."""
+"""Modelo de datos (SQLite)."""
 
 from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
-    ARRAY,
+    JSON,
     CheckConstraint,
     Date,
     DateTime,
@@ -17,17 +17,15 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    true,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-
-from app.config import get_settings
 
 Money = Numeric(20, 6)
 
 
 class Base(DeclarativeBase):
     metadata = MetaData(
-        schema=get_settings().db_schema,
         naming_convention={
             "ix": "ix_%(table_name)s_%(column_0_N_name)s",
             "uq": "uq_%(table_name)s_%(column_0_name)s",
@@ -72,8 +70,8 @@ class Security(Base):
     # general, utilities, reit, financials, cyclical (reglas de sostenibilidad por sector)
     sector_group: Mapped[str | None] = mapped_column(String(16))
     # Índices o listas de origen por los que el valor entró en el universo (SP500, STOXX600, manual…)
-    universes: Mapped[list[str]] = mapped_column(ARRAY(String(32)), server_default="{}")
-    active: Mapped[bool] = mapped_column(server_default="true")
+    universes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    active: Mapped[bool] = mapped_column(server_default=true())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -210,7 +208,7 @@ class Valuation(Base):
     fair_value: Mapped[float | None] = mapped_column(Double)
     buy_price: Mapped[float | None] = mapped_column(Double)
     quality_ok: Mapped[bool | None] = mapped_column()
-    flags: Mapped[list[str]] = mapped_column(ARRAY(String(64)), server_default="{}")
+    flags: Mapped[list[str]] = mapped_column(JSON, default=list)
     computed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

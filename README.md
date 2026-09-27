@@ -21,7 +21,7 @@ El cálculo de los precios justos y de compra está documentado en
 | Capa | Tecnología |
 |---|---|
 | Backend | Python 3.11+, FastAPI, Uvicorn |
-| Base de datos | Postgres existente, esquema propio `stockscreener` (SQLAlchemy 2 + Alembic) |
+| Base de datos | SQLite en modo WAL, un único fichero (SQLAlchemy 2 + Alembic) |
 | Datos de mercado | yfinance, detrás de la interfaz `app/providers/base.py` (sustituible) |
 | Tareas periódicas | APScheduler dentro del mismo proceso (sin Redis ni Celery) |
 | Frontend | Jinja2 + HTMX + Pico.css + Chart.js, servidos desde `app/static/vendor` (sin CDN ni paso de compilación) |
@@ -44,7 +44,7 @@ Cada valor usa su ticker de Yahoo: `AAPL`, `ENB.TO`, `SAN.MC`, `SAP.DE`, `ULVR.L
 ## Despliegue con Docker (recomendado)
 
 GitHub Actions (`.github/workflows/docker.yml`) ejecuta el lint, comprueba las migraciones y pasa
-los tests contra Postgres en cada push. Si todo pasa, publica la imagen en Docker Hub para
+los tests en cada push. Si todo pasa, publica la imagen en Docker Hub para
 `linux/amd64` y `linux/arm64`:
 
 | Origen | Etiquetas |
@@ -65,23 +65,13 @@ los tests contra Postgres en cada push. Si todo pasa, publica la imagen en Docke
 3. Lanza el workflow (*Actions → CI y Docker Hub → Run workflow*) o haz un push a la rama por
    defecto.
 
-### 2. Preparar Postgres (una vez)
-
-Conviene usar un usuario propio que solo sea dueño de su esquema:
-
-```sql
-CREATE ROLE stockscreener LOGIN PASSWORD 'cambia-esto';
-CREATE SCHEMA stockscreener AUTHORIZATION stockscreener;
-```
-
-### 3. Arrancar en el VPS
+### 2. Arrancar en el VPS
 
 En un directorio del VPS, deja el `docker-compose.yml` del repositorio y un `.env` basado en
-`.env.example`:
+`.env.example`. Como mínimo:
 
 ```bash
 # .env
-DATABASE_URL=postgresql+psycopg://stockscreener:cambia-esto@localhost:5432/midb
 STOCKSCREENER_IMAGE=tuusuario/stockscreener:latest
 ```
 
@@ -98,13 +88,30 @@ concreta, usa una etiqueta `vX.Y.Z` en `STOCKSCREENER_IMAGE` en lugar de `latest
 La imagen corre como usuario sin privilegios, tiene healthcheck en `/health` y aplica
 `alembic upgrade head` al arrancar (se desactiva con `RUN_MIGRATIONS=false`).
 
+### Base de datos y copias de seguridad
+
+La base de datos es el fichero SQLite `/data/stockscreener.db`, dentro del volumen de Docker
+`stockscreener-data`. El volumen se conserva al actualizar la imagen y al hacer
+`docker compose down`, pero **se borra con `docker compose down -v`**.
+
+Con SQLite en modo WAL no basta con copiar el fichero mientras la app está en marcha. Para hacer
+una copia consistente y sacarla del volumen:
+
+```bash
+docker compose exec stockscreener python -m app.cli backup /data/backup.db
+docker compose cp stockscreener:/data/backup.db ./stockscreener-$(date +%F).db
+```
+
+Para restaurar una copia: `docker compose stop`, copia el fichero a
+`/data/stockscreener.db` (con `docker compose cp`) y vuelve a arrancar.
+
 ## Puesta en marcha sin Docker
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
 pip install -e .
-cp .env.example .env        # edita DATABASE_URL y SECRET_KEY
-alembic upgrade head        # crea el esquema "stockscreener" y sus tablas
+cp .env.example .env        # opcional: DATABASE_URL, SECRET_KEY…
+alembic upgrade head        # crea data/stockscreener.db y sus tablas
 
 python -m app.cli universe              # descarga los índices
 python -m app.cli add SAN.MC ENB.TO     # (opcional) valores sueltos
@@ -117,9 +124,6 @@ La **carga inicial** descarga la ficha de cada valor (1 petición por valor, con
 `REQUEST_DELAY` segundos entre peticiones), 10 años de histórico en bloques de `BATCH_SIZE`
 valores y las cuentas anuales (1 petición por valor). Con unos 1.500 valores tarda alrededor de una
 hora. Se puede probar antes con unos pocos: `python -m app.cli refresh bootstrap --symbols SAN.MC AAPL`.
-
-Las migraciones solo tocan el esquema `DB_SCHEMA`. Las demás tablas de la base de datos no se ven
-afectadas.
 
 ### Tareas programadas
 
@@ -148,11 +152,9 @@ escucha solo en `127.0.0.1` y accede por un túnel SSH, o pon autenticación bá
 
 ```bash
 pip install -e '.[dev]'
-pytest                                   # tests unitarios
-TEST_DATABASE_URL=postgresql+psycopg://…/bd_desechable pytest   # + integración contra Postgres
+pytest
 ruff check . && ruff format --check .
 ```
 
-Los tests de integración usan un proveedor de datos sintético (`tests/fake_provider.py`), así que
-no necesitan conexión a Yahoo. **Borran y recrean el esquema en la base de datos indicada**: usa una
-base de datos desechable.
+Los tests de integración usan un fichero SQLite temporal y un proveedor de datos sintético
+(`tests/fake_provider.py`), así que no necesitan conexión a Yahoo.

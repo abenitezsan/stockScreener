@@ -2,9 +2,10 @@
 
 import argparse
 import logging
+import sqlite3
 
 from app import jobs, universe
-from app.db import SessionLocal
+from app.db import SessionLocal, engine
 
 TASKS = {
     "fx": jobs.refresh_fx,
@@ -36,8 +37,15 @@ def main() -> None:
     p.add_argument("tasks", nargs="+", choices=[*TASKS, "bootstrap"])
     p.add_argument("--symbols", nargs="*", help="Limitar a estos valores")
 
+    p = sub.add_parser("backup", help="Copia consistente de la base de datos (aunque esté en uso)")
+    p.add_argument("path", help="Fichero de destino, p. ej. /data/backup-2026-09-27.db")
+
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    if args.command == "backup":
+        backup(args.path)
+        return
 
     with SessionLocal() as session:
         if args.command == "universe":
@@ -53,6 +61,17 @@ def main() -> None:
                 task = TASKS[name]
                 kwargs = {"symbols": args.symbols} if args.symbols and name != "fx" else {}
                 print(f"{name}: {task(session, **kwargs)}")
+
+
+def backup(path: str) -> None:
+    """Usa la API de backup de SQLite: copiar el fichero a mano con WAL activo no es seguro."""
+    source = sqlite3.connect(engine.url.database)
+    target = sqlite3.connect(path)
+    with target:
+        source.backup(target)
+    target.close()
+    source.close()
+    print(f"Copia guardada en {path}")
 
 
 if __name__ == "__main__":

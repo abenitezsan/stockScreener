@@ -30,21 +30,9 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: stockscreener_test
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/stockscreener_test
-      TEST_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/stockscreener_test
       SCHEDULER_ENABLED: "false"
+      DATABASE_URL: sqlite:///${{ github.workspace }}/ci.db
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

@@ -13,8 +13,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 import pandas as pd
-from sqlalchemy import any_, func, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.analysis.sectors import region_for
@@ -158,34 +157,24 @@ def upsert_universe(session: Session, universe: str, symbols: Iterable[str]) -> 
     """Añade la etiqueta `universe` a los símbolos dados y se la quita a los que ya no están.
 
     Un valor que se queda sin ninguna etiqueta se desactiva (no se borra: puede tener historia).
+    Son unos pocos miles de filas: se hace en Python, sin trucos de SQL.
     """
-    symbols = sorted(set(symbols))
-    if symbols:
-        stmt = insert(Security).values(
-            [{"symbol": s, "region": region_for(s), "universes": [universe]} for s in symbols]
-        )
-        session.execute(
-            stmt.on_conflict_do_update(
-                index_elements=[Security.symbol],
-                set_={
-                    "universes": func.array_append(
-                        func.array_remove(Security.universes, universe), universe
-                    ),
-                    "active": True,
-                },
-            )
-        )
-    if universe != MANUAL:
-        session.execute(
-            update(Security)
-            .where(any_(Security.universes) == universe, Security.symbol.not_in(symbols))
-            .values(universes=func.array_remove(Security.universes, universe))
-        )
-        session.execute(
-            update(Security).where(func.cardinality(Security.universes) == 0).values(active=False)
-        )
+    wanted = {s.strip().upper() for s in symbols if s.strip()}
+    existing = {sec.symbol: sec for sec in session.scalars(select(Security))}
+    for symbol in sorted(wanted - existing.keys()):
+        session.add(Security(symbol=symbol, region=region_for(symbol), universes=[universe]))
+    for symbol, sec in existing.items():
+        tags = list(sec.universes or [])
+        if symbol in wanted:
+            if universe not in tags:
+                sec.universes = [*tags, universe]
+            sec.active = True
+        elif universe in tags and universe != MANUAL:
+            sec.universes = [t for t in tags if t != universe]
+            if not sec.universes:
+                sec.active = False
     session.commit()
-    return len(symbols)
+    return len(wanted)
 
 
 def sync_sources(session: Session, names: Iterable[str] | None = None) -> dict[str, int | str]:

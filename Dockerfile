@@ -19,8 +19,10 @@ FROM python:3.12-slim
 ENV PATH=/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    TZ=Europe/Madrid
-RUN useradd --system --uid 10001 --home-dir /app app
+    TZ=Europe/Madrid \
+    DATABASE_URL=sqlite:////data/stockscreener.db
+RUN useradd --system --uid 10001 --home-dir /app app \
+ && mkdir /data && chown app:app /data
 WORKDIR /app
 COPY --from=build /venv /venv
 COPY alembic.ini .
@@ -28,6 +30,8 @@ COPY migrations migrations
 COPY app app
 COPY docker/entrypoint.sh /entrypoint.sh
 USER app
+# Base de datos SQLite: monta aquí un volumen para que sobreviva a las actualizaciones
+VOLUME /data
 EXPOSE 8000
 HEALTHCHECK --interval=60s --timeout=5s --start-period=30s \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=4)"

@@ -1,16 +1,22 @@
 # Despliegue en el VPS: docker compose pull && docker compose up -d
 #
-# Usa la red del host para llegar al Postgres que ya corre en la máquina (localhost) sin
-# tocar su configuración. La app escucha solo en 127.0.0.1:8000: publícala a través de tu
-# nginx/Caddy (con autenticación) o accede por túnel SSH.
+# La base de datos es un fichero SQLite dentro del volumen "stockscreener-data" (/data en el
+# contenedor), que se conserva al actualizar la imagen. La app queda en 127.0.0.1:8000:
+# publícala a través de tu nginx/Caddy (con autenticación) o accede por túnel SSH.
 services:
   stockscreener:
     image: ${STOCKSCREENER_IMAGE:-tuusuario/stockscreener:latest}
     restart: unless-stopped
-    network_mode: host
-    env_file: .env
-    command: >-
-      uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --proxy-headers
+    env_file:
+      - path: .env
+        required: false
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - stockscreener-data:/data
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  stockscreener-data:

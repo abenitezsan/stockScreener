@@ -2,18 +2,13 @@
 
 Revision ID: 0001
 Revises:
-Create Date: 2026-09-26 19:54:07.201261
+Create Date: 2026-09-27 20:24:01.943333
 """
 
 from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
-
-from app.config import get_settings
-
-SCHEMA = get_settings().db_schema
-
 
 revision: str = "0001"
 down_revision: str | None = None
@@ -29,7 +24,6 @@ def upgrade() -> None:
         sa.Column("currency", sa.String(length=3), nullable=False),
         sa.Column("rate_to_base", sa.Double(), nullable=False),
         sa.PrimaryKeyConstraint("day", "currency", name=op.f("pk_fx_rates")),
-        schema=SCHEMA,
     )
     op.create_table(
         "securities",
@@ -46,28 +40,23 @@ def upgrade() -> None:
         sa.Column("sector", sa.String(length=128), nullable=True),
         sa.Column("industry", sa.String(length=128), nullable=True),
         sa.Column("sector_group", sa.String(length=16), nullable=True),
-        sa.Column("universes", sa.ARRAY(sa.String(length=32)), server_default="{}", nullable=False),
-        sa.Column("active", sa.Boolean(), server_default="true", nullable=False),
+        sa.Column("universes", sa.JSON(), nullable=False),
+        sa.Column("active", sa.Boolean(), server_default=sa.text("1"), nullable=False),
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_securities")),
         sa.UniqueConstraint("symbol", name=op.f("uq_securities_symbol")),
-        schema=SCHEMA,
     )
-    op.create_index(
-        op.f("ix_securities_country"), "securities", ["country"], unique=False, schema=SCHEMA
-    )
-    op.create_index(op.f("ix_securities_isin"), "securities", ["isin"], unique=False, schema=SCHEMA)
-    op.create_index(
-        op.f("ix_securities_region"), "securities", ["region"], unique=False, schema=SCHEMA
-    )
-    op.create_index(
-        op.f("ix_securities_sector"), "securities", ["sector"], unique=False, schema=SCHEMA
-    )
+    with op.batch_alter_table("securities", schema=None) as batch_op:
+        batch_op.create_index(batch_op.f("ix_securities_country"), ["country"], unique=False)
+        batch_op.create_index(batch_op.f("ix_securities_isin"), ["isin"], unique=False)
+        batch_op.create_index(batch_op.f("ix_securities_region"), ["region"], unique=False)
+        batch_op.create_index(batch_op.f("ix_securities_sector"), ["sector"], unique=False)
+
     op.create_table(
         "users",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -76,12 +65,11 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_users")),
         sa.UniqueConstraint("username", name=op.f("uq_users_username")),
-        schema=SCHEMA,
     )
     op.create_table(
         "dividend_events",
@@ -92,13 +80,12 @@ def upgrade() -> None:
         sa.Column("amount", sa.Double(), nullable=False),
         sa.ForeignKeyConstraint(
             ["security_id"],
-            [f"{SCHEMA}.securities.id"],
+            ["securities.id"],
             name=op.f("fk_dividend_events_security_id_securities"),
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_dividend_events")),
         sa.UniqueConstraint("security_id", "ex_date", name=op.f("uq_dividend_events_security_id")),
-        schema=SCHEMA,
     )
     op.create_table(
         "financials_annual",
@@ -114,12 +101,11 @@ def upgrade() -> None:
         sa.Column("shares", sa.Double(), nullable=True),
         sa.ForeignKeyConstraint(
             ["security_id"],
-            [f"{SCHEMA}.securities.id"],
+            ["securities.id"],
             name=op.f("fk_financials_annual_security_id_securities"),
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("security_id", "period_end", name=op.f("pk_financials_annual")),
-        schema=SCHEMA,
     )
     op.create_table(
         "fundamentals",
@@ -149,25 +135,22 @@ def upgrade() -> None:
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
             ["security_id"],
-            [f"{SCHEMA}.securities.id"],
+            ["securities.id"],
             name=op.f("fk_fundamentals_security_id_securities"),
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("security_id", name=op.f("pk_fundamentals")),
-        schema=SCHEMA,
     )
-    op.create_index(
-        op.f("ix_fundamentals_market_cap_eur"),
-        "fundamentals",
-        ["market_cap_eur"],
-        unique=False,
-        schema=SCHEMA,
-    )
+    with op.batch_alter_table("fundamentals", schema=None) as batch_op:
+        batch_op.create_index(
+            batch_op.f("ix_fundamentals_market_cap_eur"), ["market_cap_eur"], unique=False
+        )
+
     op.create_table(
         "price_history",
         sa.Column("security_id", sa.Integer(), nullable=False),
@@ -175,12 +158,11 @@ def upgrade() -> None:
         sa.Column("close", sa.Double(), nullable=False),
         sa.ForeignKeyConstraint(
             ["security_id"],
-            [f"{SCHEMA}.securities.id"],
+            ["securities.id"],
             name=op.f("fk_price_history_security_id_securities"),
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("security_id", "day", name=op.f("pk_price_history")),
-        schema=SCHEMA,
     )
     op.create_table(
         "quotes",
@@ -191,17 +173,16 @@ def upgrade() -> None:
         sa.Column(
             "updated_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
             ["security_id"],
-            [f"{SCHEMA}.securities.id"],
+            ["securities.id"],
             name=op.f("fk_quotes_security_id_securities"),
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("security_id", name=op.f("pk_quotes")),
-        schema=SCHEMA,
     )
     op.create_table(
         "transactions",
@@ -220,27 +201,26 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
         sa.CheckConstraint("kind IN ('buy', 'sell')", name=op.f("ck_transactions_kind")),
         sa.CheckConstraint("quantity > 0", name=op.f("ck_transactions_quantity_positive")),
         sa.ForeignKeyConstraint(
             ["security_id"],
-            [f"{SCHEMA}.securities.id"],
+            ["securities.id"],
             name=op.f("fk_transactions_security_id_securities"),
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_transactions")),
-        schema=SCHEMA,
     )
-    op.create_index(
-        op.f("ix_transactions_security_id_trade_date"),
-        "transactions",
-        ["security_id", "trade_date"],
-        unique=False,
-        schema=SCHEMA,
-    )
+    with op.batch_alter_table("transactions", schema=None) as batch_op:
+        batch_op.create_index(
+            batch_op.f("ix_transactions_security_id_trade_date"),
+            ["security_id", "trade_date"],
+            unique=False,
+        )
+
     op.create_table(
         "valuations",
         sa.Column("security_id", sa.Integer(), nullable=False),
@@ -270,21 +250,20 @@ def upgrade() -> None:
         sa.Column("fair_value", sa.Double(), nullable=True),
         sa.Column("buy_price", sa.Double(), nullable=True),
         sa.Column("quality_ok", sa.Boolean(), nullable=True),
-        sa.Column("flags", sa.ARRAY(sa.String(length=64)), server_default="{}", nullable=False),
+        sa.Column("flags", sa.JSON(), nullable=False),
         sa.Column(
             "computed_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(
             ["security_id"],
-            [f"{SCHEMA}.securities.id"],
+            ["securities.id"],
             name=op.f("fk_valuations_security_id_securities"),
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("security_id", name=op.f("pk_valuations")),
-        schema=SCHEMA,
     )
     op.create_table(
         "watchlist",
@@ -293,16 +272,18 @@ def upgrade() -> None:
         sa.Column("margin_of_safety", sa.Double(), nullable=True),
         sa.Column("target_total_return", sa.Double(), nullable=True),
         sa.Column(
-            "added_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False
+            "added_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
+            nullable=False,
         ),
         sa.ForeignKeyConstraint(
             ["security_id"],
-            [f"{SCHEMA}.securities.id"],
+            ["securities.id"],
             name=op.f("fk_watchlist_security_id_securities"),
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("security_id", name=op.f("pk_watchlist")),
-        schema=SCHEMA,
     )
     op.create_table(
         "dividend_payments",
@@ -335,7 +316,7 @@ def upgrade() -> None:
         sa.Column(
             "created_at",
             sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
+            server_default=sa.text("(CURRENT_TIMESTAMP)"),
             nullable=False,
         ),
         sa.CheckConstraint(
@@ -343,13 +324,13 @@ def upgrade() -> None:
         ),
         sa.ForeignKeyConstraint(
             ["dividend_event_id"],
-            [f"{SCHEMA}.dividend_events.id"],
+            ["dividend_events.id"],
             name=op.f("fk_dividend_payments_dividend_event_id_dividend_events"),
             ondelete="SET NULL",
         ),
         sa.ForeignKeyConstraint(
             ["security_id"],
-            [f"{SCHEMA}.securities.id"],
+            ["securities.id"],
             name=op.f("fk_dividend_payments_security_id_securities"),
             ondelete="RESTRICT",
         ),
@@ -357,41 +338,42 @@ def upgrade() -> None:
         sa.UniqueConstraint(
             "dividend_event_id", name=op.f("uq_dividend_payments_dividend_event_id")
         ),
-        schema=SCHEMA,
     )
-    op.create_index(
-        op.f("ix_dividend_payments_pay_date"),
-        "dividend_payments",
-        ["pay_date"],
-        unique=False,
-        schema=SCHEMA,
-    )
+    with op.batch_alter_table("dividend_payments", schema=None) as batch_op:
+        batch_op.create_index(
+            batch_op.f("ix_dividend_payments_pay_date"), ["pay_date"], unique=False
+        )
+
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     # ### commands auto generated by Alembic - please adjust! ###
-    op.drop_index(
-        op.f("ix_dividend_payments_pay_date"), table_name="dividend_payments", schema=SCHEMA
-    )
-    op.drop_table("dividend_payments", schema=SCHEMA)
-    op.drop_table("watchlist", schema=SCHEMA)
-    op.drop_table("valuations", schema=SCHEMA)
-    op.drop_index(
-        op.f("ix_transactions_security_id_trade_date"), table_name="transactions", schema=SCHEMA
-    )
-    op.drop_table("transactions", schema=SCHEMA)
-    op.drop_table("quotes", schema=SCHEMA)
-    op.drop_table("price_history", schema=SCHEMA)
-    op.drop_index(op.f("ix_fundamentals_market_cap_eur"), table_name="fundamentals", schema=SCHEMA)
-    op.drop_table("fundamentals", schema=SCHEMA)
-    op.drop_table("financials_annual", schema=SCHEMA)
-    op.drop_table("dividend_events", schema=SCHEMA)
-    op.drop_table("users", schema=SCHEMA)
-    op.drop_index(op.f("ix_securities_sector"), table_name="securities", schema=SCHEMA)
-    op.drop_index(op.f("ix_securities_region"), table_name="securities", schema=SCHEMA)
-    op.drop_index(op.f("ix_securities_isin"), table_name="securities", schema=SCHEMA)
-    op.drop_index(op.f("ix_securities_country"), table_name="securities", schema=SCHEMA)
-    op.drop_table("securities", schema=SCHEMA)
-    op.drop_table("fx_rates", schema=SCHEMA)
+    with op.batch_alter_table("dividend_payments", schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f("ix_dividend_payments_pay_date"))
+
+    op.drop_table("dividend_payments")
+    op.drop_table("watchlist")
+    op.drop_table("valuations")
+    with op.batch_alter_table("transactions", schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f("ix_transactions_security_id_trade_date"))
+
+    op.drop_table("transactions")
+    op.drop_table("quotes")
+    op.drop_table("price_history")
+    with op.batch_alter_table("fundamentals", schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f("ix_fundamentals_market_cap_eur"))
+
+    op.drop_table("fundamentals")
+    op.drop_table("financials_annual")
+    op.drop_table("dividend_events")
+    op.drop_table("users")
+    with op.batch_alter_table("securities", schema=None) as batch_op:
+        batch_op.drop_index(batch_op.f("ix_securities_sector"))
+        batch_op.drop_index(batch_op.f("ix_securities_region"))
+        batch_op.drop_index(batch_op.f("ix_securities_isin"))
+        batch_op.drop_index(batch_op.f("ix_securities_country"))
+
+    op.drop_table("securities")
+    op.drop_table("fx_rates")
     # ### end Alembic commands ###

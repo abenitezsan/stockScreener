@@ -8,8 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    database_url: str = "postgresql+psycopg://localhost/stockscreener"
-    db_schema: str = "stockscreener"
+    database_url: str = "sqlite:///data/stockscreener.db"
     base_currency: str = "EUR"
     secret_key: str = "dev-insecure"
     timezone: str = "Europe/Madrid"

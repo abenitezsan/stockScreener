@@ -6,7 +6,7 @@ from collections.abc import Iterator, Sequence
 from datetime import timedelta
 
 from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session
 
 from app.analysis import sectors
