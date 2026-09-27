@@ -76,7 +76,9 @@ def fmt(value, kind: str = "money") -> str:
 
 
 templates.env.filters["fmt"] = fmt
+ROOT = get_settings().root_path.rstrip("/")
 templates.env.globals.update(
+    ROOT=ROOT,
     FLAG_LABELS=FLAG_LABELS,
     GROUP_LABELS=GROUP_LABELS,
     SIGNAL_LABELS=SIGNAL_LABELS,
@@ -137,7 +139,7 @@ def _screener_context(session: Session, f: screener.Filters) -> dict:
 
 @router.get("/")
 def index():
-    return RedirectResponse("/screener")
+    return RedirectResponse(f"{ROOT}/screener")
 
 
 @router.get("/screener", response_class=HTMLResponse)
@@ -245,7 +247,7 @@ def update_watch(
     item.target_total_return = target / 100 if target is not None else None
     session.add(item)
     session.commit()
-    return RedirectResponse(f"/security/{sec.symbol}", status_code=303)
+    return RedirectResponse(f"{ROOT}/security/{sec.symbol}", status_code=303)
 
 
 @router.get("/portfolio", response_class=HTMLResponse)

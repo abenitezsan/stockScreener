@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     base_currency: str = "EUR"
     secret_key: str = "dev-insecure"
     timezone: str = "Europe/Madrid"
+    # Prefijo público cuando la app va detrás de un proxy en una subruta (p. ej. /stockscreener).
+    # El proxy quita el prefijo antes de reenviar; la app solo lo usa para generar enlaces.
+    root_path: str = ""
 
     # Valoración (ver docs/valoracion.md)
     valuation_window_years: int = 5

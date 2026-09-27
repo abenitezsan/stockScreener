@@ -1,3 +1,3 @@
-<button class="star" hx-post="/watchlist/{{ id }}/toggle" hx-swap="outerHTML"
+<button class="star" hx-post="{{ ROOT }}/watchlist/{{ id }}/toggle" hx-swap="outerHTML"
         title="{{ 'Quitar de seguimiento' if watched else 'Añadir a seguimiento' }}"
         aria-label="{{ 'Quitar de seguimiento' if watched else 'Añadir a seguimiento' }}">{{ '★' if watched else '☆' }}</button>

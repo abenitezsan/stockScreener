@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{{ sec.symbol }} · Stock Screener{% endblock %}
-{% block head %}<script src="{{ url_for('static', path='vendor/chart-4.4.4.umd.min.js') }}" defer></script>{% endblock %}
+{% block head %}<script src="{{ ROOT }}/static/vendor/chart-4.4.4.umd.min.js" defer></script>{% endblock %}
 {% block content %}
 {% set v = row.valuation %}{% set f = row.fundamentals %}{% set p = row.price %}
 <hgroup>
@@ -74,7 +74,7 @@
 
 <section>
   <h4>Seguimiento</h4>
-  <form method="post" action="/security/{{ sec.symbol }}/watch" class="grid">
+  <form method="post" action="{{ ROOT }}/security/{{ sec.symbol }}/watch" class="grid">
     <label>Margen de seguridad (%)<input type="number" step="any" name="margin_of_safety" value="{{ (row.item.margin_of_safety * 100) if row.item.margin_of_safety is not none else '' }}" placeholder="{{ settings.margin_of_safety * 100 }}"></label>
     <label>Rentabilidad total objetivo (%)<input type="number" step="any" name="target_total_return" value="{{ (row.item.target_total_return * 100) if row.item.target_total_return is not none else '' }}" placeholder="{{ settings.target_total_return * 100 }}"></label>
     <label>Notas<input type="text" name="notes" value="{{ row.item.notes or '' }}"></label>
@@ -84,5 +84,5 @@
 <p class="muted"><small>Valoración calculada: {{ v.computed_at.strftime('%d/%m/%Y %H:%M') if v else '–' }} · Cotización: {{ row.quote.as_of.strftime('%d/%m/%Y') if row.quote and row.quote.as_of else '–' }}</small></p>
 
 <script type="application/json" id="chart-data">{{ chart_data | tojson }}</script>
-<script src="{{ url_for('static', path='charts.js') }}" defer></script>
+<script src="{{ ROOT }}/static/charts.js" defer></script>
 {% endblock %}

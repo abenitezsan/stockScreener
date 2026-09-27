@@ -2,7 +2,7 @@
 {% block title %}Screener · Stock Screener{% endblock %}
 {% block content %}
 <h2>Screener de dividendos</h2>
-<form id="filters" class="filters" hx-get="/screener" hx-target="#results" hx-push-url="true"
+<form id="filters" class="filters" hx-get="{{ ROOT }}/screener" hx-target="#results" hx-push-url="true"
       hx-trigger="change, keyup changed delay:400ms from:input[name=q]">
   <input type="hidden" name="submitted" value="1">
   <input type="hidden" name="sector" value="{{ filters.sector }}">

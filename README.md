@@ -67,23 +67,9 @@ los tests en cada push. Si todo pasa, publica la imagen en Docker Hub para
 
 ### 2. Arrancar en el VPS
 
-En un directorio del VPS, deja el `docker-compose.yml` del repositorio y un `.env` basado en
-`.env.example`. Como mínimo:
-
-```bash
-# .env
-STOCKSCREENER_IMAGE=tuusuario/stockscreener:latest
-```
-
-```bash
-docker compose pull && docker compose up -d        # aplica las migraciones al arrancar
-docker compose exec stockscreener python -m app.cli universe
-docker compose exec stockscreener python -m app.cli refresh bootstrap
-docker compose logs -f
-```
-
-Para actualizar: `docker compose pull && docker compose up -d`. Para quedarte en una versión
-concreta, usa una etiqueta `vX.Y.Z` en `STOCKSCREENER_IMAGE` en lugar de `latest`.
+En el VPS la app va detrás del nginx de tabbito, bajo `http://<IP>/stockscreener/`, con usuario
+y contraseña. Los pasos, con los cambios necesarios en el `docker-compose.prod.yml` y el
+`tabbito.conf` de tabbito, están en **[deploy/README.md](deploy/README.md)**.
 
 La imagen corre como usuario sin privilegios, tiene healthcheck en `/health` y aplica
 `alembic upgrade head` al arrancar (se desactiva con `RUN_MIGRATIONS=false`).
@@ -144,9 +130,8 @@ Cualquier tarea se puede lanzar a mano:
 
 ### Seguridad
 
-La aplicación todavía **no tiene autenticación**. Hasta que la tenga, no la expongas a internet:
-escucha solo en `127.0.0.1` y accede por un túnel SSH, o pon autenticación básica en el proxy
-(nginx/Caddy).
+La aplicación no tiene login propio. En el VPS la protege la autenticación básica de nginx
+(ver [deploy/README.md](deploy/README.md)). No publiques su puerto directamente.
 
 ## Desarrollo
 

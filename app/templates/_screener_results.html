@@ -19,7 +19,7 @@
     <tr>
       <td>{% with id=row.id, watched=row.id in watched %}{% include "_watch_button.html" %}{% endwith %}</td>
       {% for col in columns %}{% set _, _, kind = COLUMNS[col] %}{% set value = row[col] %}
-        {% if col == 'symbol' %}<td><a href="/security/{{ value }}">{{ value }}</a></td>
+        {% if col == 'symbol' %}<td><a href="{{ ROOT }}/security/{{ value }}">{{ value }}</a></td>
         {% elif col == 'name' %}<td class="name" title="{{ value or '' }}">{{ value or '–' }}</td>
         {% else %}<td class="{{ 'num' if kind != 'text' }}{{ ' hi' if col == 'yield_ttm' and value and value > 0.06 }}">{{ value | fmt(kind) }}</td>{% endif %}
       {% endfor %}

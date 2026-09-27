@@ -16,7 +16,7 @@
   {% for r in rows %}{% set v = r.valuation %}{% set f = r.fundamentals %}
     <tr>
       <td>{% with id=r.security.id, watched=True %}{% include "_watch_button.html" %}{% endwith %}</td>
-      <td><a href="/security/{{ r.security.symbol }}">{{ r.security.symbol }}</a></td>
+      <td><a href="{{ ROOT }}/security/{{ r.security.symbol }}">{{ r.security.symbol }}</a></td>
       <td class="name" title="{{ r.security.name or '' }}">{{ r.security.name or '–' }}</td>
       <td>{% with signal=r.signal %}{% include "_signal.html" %}{% endwith %}</td>
       <td class="num">{{ r.price | fmt }}</td>
@@ -34,7 +34,7 @@
       <td class="name" title="{{ r.item.notes or '' }}">{{ r.item.notes or '' }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="17">Aún no sigues ningún valor. Márcalos con ☆ en el <a href="/screener">screener</a>.</td></tr>
+    <tr><td colspan="17">Aún no sigues ningún valor. Márcalos con ☆ en el <a href="{{ ROOT }}/screener">screener</a>.</td></tr>
   {% endfor %}
   </tbody>
 </table>

@@ -1,25 +1,41 @@
-# Despliegue en el VPS: docker compose pull && docker compose up -d
+# Despliegue en el VPS, detrás del nginx que ya expone el puerto 80 (proyecto tabbito).
 #
-# La base de datos es un fichero SQLite dentro del volumen "stockscreener-data" (/data en el
-# contenedor), que se conserva al actualizar la imagen. La app queda en 127.0.0.1:8000
-# (cambia el puerto con STOCKSCREENER_PORT en .env si ya está ocupado):
-# publícala a través de tu nginx/Caddy (con autenticación) o accede por túnel SSH.
+# No publica ningún puerto: se une a la red Docker compartida "web", por la que el nginx
+# existente le reenvía /stockscreener/. Pasos completos en deploy/README.md.
+#
+#   docker network create web          # una sola vez
+#   docker compose pull && docker compose up -d
+#
+# La base de datos es un fichero SQLite en el volumen "stockscreener-data" (/data), que se
+# conserva al actualizar la imagen (se borra con `docker compose down -v`).
 name: stockscreener
 
 services:
   stockscreener:
-    image: ${STOCKSCREENER_IMAGE:-tuusuario/stockscreener:latest}
+    image: ${STOCKSCREENER_IMAGE:-abenitezsan/stockscreener:latest}
     restart: unless-stopped
     env_file:
       - path: .env
         required: false
-    ports:
-      - "127.0.0.1:${STOCKSCREENER_PORT:-8000}:8000"
+    environment:
+      # Subruta pública (la misma que en la location de nginx)
+      ROOT_PATH: ${ROOT_PATH:-/stockscreener}
+      # Solo le llega tráfico del nginx por la red interna: se aceptan sus cabeceras X-Forwarded-*
+      FORWARDED_ALLOW_IPS: "*"
     volumes:
       - stockscreener-data:/data
+    networks:
+      - web
+    # Mismo estilo de límites que tabbito; la app usa ~150-250 MB
+    cpus: "0.5"
+    mem_limit: "512m"
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
 volumes:
   stockscreener-data:
+
+networks:
+  web:
+    external: true

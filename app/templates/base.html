@@ -4,10 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Stock Screener{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='vendor/pico-2.0.6.min.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='app.css') }}">
-  <script src="{{ url_for('static', path='vendor/htmx-2.0.4.min.js') }}" defer></script>
-  <script src="{{ url_for('static', path='app.js') }}" defer></script>
+  <link rel="stylesheet" href="{{ ROOT }}/static/vendor/pico-2.0.6.min.css">
+  <link rel="stylesheet" href="{{ ROOT }}/static/app.css">
+  <script src="{{ ROOT }}/static/vendor/htmx-2.0.4.min.js" defer></script>
+  <script src="{{ ROOT }}/static/app.js" defer></script>
   {% block head %}{% endblock %}
 </head>
 <body>
@@ -15,9 +15,9 @@
     <nav>
       <ul><li><strong>Stock Screener</strong></li></ul>
       <ul>
-        <li><a href="/screener">Screener</a></li>
-        <li><a href="/watchlist">Seguimiento</a></li>
-        <li><a href="/portfolio">Cartera</a></li>
+        <li><a href="{{ ROOT }}/screener">Screener</a></li>
+        <li><a href="{{ ROOT }}/watchlist">Seguimiento</a></li>
+        <li><a href="{{ ROOT }}/portfolio">Cartera</a></li>
       </ul>
     </nav>
   </header>
