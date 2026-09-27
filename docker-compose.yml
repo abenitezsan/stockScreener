@@ -1,8 +1,11 @@
 # Despliegue en el VPS: docker compose pull && docker compose up -d
 #
 # La base de datos es un fichero SQLite dentro del volumen "stockscreener-data" (/data en el
-# contenedor), que se conserva al actualizar la imagen. La app queda en 127.0.0.1:8000:
+# contenedor), que se conserva al actualizar la imagen. La app queda en 127.0.0.1:8000
+# (cambia el puerto con STOCKSCREENER_PORT en .env si ya está ocupado):
 # publícala a través de tu nginx/Caddy (con autenticación) o accede por túnel SSH.
+name: stockscreener
+
 services:
   stockscreener:
     image: ${STOCKSCREENER_IMAGE:-tuusuario/stockscreener:latest}
@@ -11,7 +14,7 @@ services:
       - path: .env
         required: false
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${STOCKSCREENER_PORT:-8000}:8000"
     volumes:
       - stockscreener-data:/data
     logging:
