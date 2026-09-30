@@ -8,6 +8,7 @@ import csv
 import io
 import logging
 import re
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
@@ -17,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.analysis.sectors import region_for
+from app.config import get_settings
 from app.models import Security
 
 log = logging.getLogger(__name__)
@@ -94,33 +96,73 @@ def _column_name(column) -> str:
     return re.sub(r"\[.*?\]", "", str(column)).strip().lower()
 
 
-def _wiki_symbols(
-    html: str, columns: tuple[str, ...], translate: Callable[[str], str]
-) -> list[str]:
-    """Busca la primera tabla con alguna de las columnas indicadas y traduce sus tickers.
+NAME_COLUMNS = ("Company", "Name", "Company name", "Constituent", "Constituent name")
 
-    Tolera notas al pie y variantes ("Ticker[a]", "Ticker symbol"). Si no encuentra nada, el
-    error lista las columnas de las tablas de la página para poder ajustar la fuente.
-    """
+
+def _find_column(tables: list[pd.DataFrame], columns: tuple[str, ...]):
+    """Primera tabla (de al menos 10 filas) con alguna de las columnas; tolera notas al pie y
+    variantes ("Ticker[a]", "Ticker symbol")."""
     wanted = {c.lower() for c in columns}
-    seen = []
+    for table in tables:
+        for c in table.columns:
+            name = _column_name(c)
+            if name in wanted or (name.split() or [""])[0] in wanted:
+                return table, c
+    return None, None
+
+
+def _wiki_symbols(
+    html: str,
+    columns: tuple[str, ...],
+    translate: Callable[[str], str],
+    resolve_names: Callable[[list[str]], list[str]] | None = None,
+) -> list[str]:
+    """Tickers de la tabla de componentes de una página de Wikipedia.
+
+    Si la tabla no trae tickers sino solo nombres de empresa (p. ej. la del ATX), y hay
+    `resolve_names`, los nombres se traducen a tickers buscándolos en el proveedor de datos.
+    Si no encuentra nada, el error lista las columnas de las tablas de la página.
+    """
+    tables = []
     for table in pd.read_html(io.StringIO(html)):
         if isinstance(table.columns, pd.MultiIndex):
             table.columns = [c[-1] for c in table.columns]
-        if len(table) < 10:
-            continue
-        seen.append([str(c) for c in table.columns])
-        column = next(
-            (
-                c
-                for c in table.columns
-                if _column_name(c) in wanted or (_column_name(c).split() or [""])[0] in wanted
-            ),
-            None,
-        )
+        if len(table) >= 10:
+            tables.append(table)
+    table, column = _find_column(tables, columns)
+    if column is not None:
+        return [translate(str(t)) for t in table[column].dropna() if str(t).strip()]
+    if resolve_names is not None:
+        table, column = _find_column(tables, NAME_COLUMNS)
         if column is not None:
-            return [translate(str(t)) for t in table[column].dropna() if str(t).strip()]
+            names = [re.sub(r"\[.*?\]", "", str(n)).strip() for n in table[column].dropna()]
+            return resolve_names([n for n in names if n])
+    seen = [[str(c) for c in t.columns] for t in tables]
     raise ValueError(f"No se encontró ninguna tabla con las columnas {columns}. Tablas: {seen}")
+
+
+def resolve_company_names(names: list[str], suffix: str) -> list[str]:
+    """Busca cada empresa en el proveedor y se queda con el ticker de la bolsa de `suffix`."""
+    from app.providers import get_provider
+
+    provider = get_provider()
+    delay = get_settings().request_delay
+    symbols, missing = [], []
+    for name in names:
+        try:
+            symbol = provider.find_symbol(name, suffix)
+        except Exception:  # un nombre que falla no debe tumbar el índice entero
+            log.exception("Error buscando %s", name)
+            symbol = None
+        if symbol:
+            symbols.append(symbol)
+        else:
+            missing.append(name)
+        time.sleep(delay)
+    log.info("Nombres resueltos a tickers %s: %d/%d", suffix, len(symbols), len(names))
+    if missing:
+        log.warning("Sin ticker %s para: %s (añádelos con `add`)", suffix, ", ".join(missing))
+    return symbols
 
 
 def parse_ishares_holdings(text: str) -> list[str]:
@@ -161,7 +203,12 @@ def wiki(url: str, suffix: str) -> Source:
     """Página de Wikipedia con una tabla de componentes; los tickers llevan `suffix` en Yahoo."""
     return Source(
         f"https://en.wikipedia.org/wiki/{url}",
-        lambda html: _wiki_symbols(html, TICKER_COLUMNS, lambda t: with_suffix(t, suffix)),
+        lambda html: _wiki_symbols(
+            html,
+            TICKER_COLUMNS,
+            lambda t: with_suffix(t, suffix),
+            lambda names: resolve_company_names(names, suffix),
+        ),
     )
 
 

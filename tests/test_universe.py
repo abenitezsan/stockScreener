@@ -119,3 +119,36 @@ def test_default_sources_skip_blocked_stoxx600(monkeypatch):
     assert "STOXX600" not in result
     assert {"SP500", "TSX60", "IBEX35", "DAX", "FTSE100", "OMXS30"} <= result.keys()
     assert not any("ishares" in url for url in fetched)
+
+
+def test_wiki_table_with_names_only_uses_resolver():
+    body = "".join(f"<tr><td>Firma {i} AG[1]</td><td>Industrials</td></tr>" for i in range(12))
+    html = f"<table><tr><th>Company</th><th>Sector</th></tr>{body}</table>"
+    resolved = _wiki_symbols(
+        html,
+        ("Ticker",),
+        us_symbol,
+        lambda names: [n.split()[1] + ".VI" for n in names if n != "Firma 3 AG"],
+    )
+    assert resolved[:2] == ["0.VI", "1.VI"] and len(resolved) == 11
+    # sin resolver, el error sigue listando las columnas
+    try:
+        _wiki_symbols(html, ("Ticker",), us_symbol)
+    except ValueError as exc:
+        assert "['Company', 'Sector']" in str(exc)
+
+
+def test_resolve_company_names_logs_missing(monkeypatch, caplog):
+    import logging
+
+    from app import universe
+
+    class Provider:
+        def find_symbol(self, name, suffix):
+            return {"Andritz AG": "ANDR.VI"}.get(name)
+
+    monkeypatch.setattr("app.providers.get_provider", lambda: Provider())
+    monkeypatch.setattr(universe.time, "sleep", lambda s: None)
+    with caplog.at_level(logging.INFO, logger="app.universe"):
+        assert universe.resolve_company_names(["Andritz AG", "Nadie SA"], ".VI") == ["ANDR.VI"]
+    assert "1/2" in caplog.text and "Nadie SA" in caplog.text

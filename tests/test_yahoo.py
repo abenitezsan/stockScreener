@@ -95,3 +95,17 @@ def test_get_financials(monkeypatch):
     assert [f.period_end for f in fins] == [date(2024, 12, 31), date(2025, 12, 31)]
     assert fins[1].eps == 2.2 and fins[1].net_income is None
     assert fins[1].dividends_paid == 55.0 and fins[1].free_cashflow == 90.0
+
+
+def test_find_symbol_prefers_equity_on_requested_exchange(monkeypatch):
+    class FakeSearch:
+        def __init__(self, query, **kwargs):
+            self.quotes = [
+                {"symbol": "ANDRF", "quoteType": "EQUITY"},  # OTC de EE. UU.
+                {"symbol": "ANDR.DE", "quoteType": "EQUITY"},
+                {"symbol": "ANDR.VI", "quoteType": "EQUITY"},
+            ]
+
+    monkeypatch.setattr(yahoo.yf, "Search", FakeSearch)
+    assert YahooProvider().find_symbol("Andritz AG", ".VI") == "ANDR.VI"
+    assert YahooProvider().find_symbol("Andritz AG", ".MC") is None

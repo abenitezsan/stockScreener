@@ -54,6 +54,11 @@ def main() -> None:
     p = sub.add_parser("refresh", help="Ejecuta tareas de actualización")
     p.add_argument("tasks", nargs="+", choices=[*TASKS, "bootstrap"])
     p.add_argument("--symbols", nargs="*", help="Limitar a estos valores")
+    p.add_argument(
+        "--missing",
+        action="store_true",
+        help="Solo los valores activos que aún no tienen ficha (p. ej. recién añadidos)",
+    )
 
     sub.add_parser(
         "full-load",
@@ -86,6 +91,19 @@ def main() -> None:
         elif args.command == "add":
             print(universe.upsert_universe(session, universe.MANUAL, args.symbols), "valores")
         elif args.command == "refresh":
+            if args.missing:
+                args.symbols = list(
+                    session.scalars(
+                        select(Security.symbol).where(
+                            Security.active,
+                            Security.id.not_in(select(Fundamentals.security_id)),
+                        )
+                    )
+                )
+                print(f"Valores sin datos: {len(args.symbols)}")
+                logging.getLogger("app.cli").info("Valores sin datos: %d", len(args.symbols))
+                if not args.symbols:
+                    return
             if args.symbols:
                 args.symbols = [sym.strip().upper() for sym in args.symbols]
                 known = set(

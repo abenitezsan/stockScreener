@@ -247,6 +247,16 @@ class YahooProvider:
             result.append(FinancialsData(period_end=period_end, **values))
         return result
 
+    def find_symbol(self, name: str, suffix: str) -> str | None:
+        quotes = yf.Search(
+            name, max_results=10, news_count=0, lists_count=0, recommended=0, raise_errors=False
+        ).quotes
+        for quote in quotes or []:
+            symbol = str(quote.get("symbol", "")).upper()
+            if quote.get("quoteType") == "EQUITY" and symbol.endswith(suffix.upper()):
+                return symbol
+        return None
+
     def get_fx_rates(self, currencies: list[str], base: str) -> dict[str, float]:
         """Devuelve {divisa: unidades de `base` por 1 unidad de divisa}. Usa pares tipo USDEUR=X."""
         others = sorted({c for c in currencies if c and c != base})
