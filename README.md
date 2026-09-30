@@ -77,20 +77,25 @@ La imagen corre como usuario sin privilegios, tiene healthcheck en `/health` y a
 
 ### Base de datos y copias de seguridad
 
-La base de datos es el fichero SQLite `/data/stockscreener.db`, dentro del volumen de Docker
-`stockscreener-data`. El volumen se conserva al actualizar la imagen y al hacer
-`docker compose down`, pero **se borra con `docker compose down -v`**.
+La base de datos es el fichero SQLite `data/stockscreener.db`, en una carpeta del host junto al
+`docker-compose.yml` (montada en `/data` dentro del contenedor). No depende del contenedor ni de
+volúmenes de Docker: se conserva al actualizar la imagen, al recrear el contenedor y con
+`docker compose down -v`.
 
-Con SQLite en modo WAL no basta con copiar el fichero mientras la app está en marcha. Para hacer
-una copia consistente y sacarla del volumen:
+Con SQLite en modo WAL no basta con copiar el fichero mientras la app está en marcha: los
+últimos cambios pueden estar aún en `stockscreener.db-wal`. Para hacer una copia consistente
+en caliente:
 
 ```bash
-docker compose exec stockscreener python -m app.cli backup /data/backup.db
-docker compose cp stockscreener:/data/backup.db ./stockscreener-$(date +%F).db
+docker compose exec stockscreener python -m app.cli backup /data/backup-$(date +%F).db
+# queda en ./data/backup-AAAA-MM-DD.db en el host
 ```
 
-Para restaurar una copia: `docker compose stop`, copia el fichero a
-`/data/stockscreener.db` (con `docker compose cp`) y vuelve a arrancar.
+Para restaurar una copia:
+1. `docker compose stop`.
+2. Sustituye `data/stockscreener.db` por la copia y borra `data/stockscreener.db-wal` y
+   `data/stockscreener.db-shm` si existen.
+3. `docker compose start`.
 
 ## Puesta en marcha sin Docker
 

@@ -26,6 +26,7 @@ pueden actualizar, parar o reiniciar por separado:
 ├── stockscreener/
 │   ├── docker-compose.yml   # ../docker-compose.yml de este repositorio
 │   ├── .env                 # opcional (ver ../.env.example)
+│   ├── data/                # stockscreener.db (SQLite) y copias de seguridad
 │   └── logs/                # app.log (web y tareas programadas) y cli.log, con rotación
 └── edge/                    # copia de deploy/edge/ de este repositorio
     ├── docker-compose.yml
@@ -44,12 +45,14 @@ Crea `/home/debian/stockscreener/` con el `docker-compose.yml` del repositorio y
 
 ```bash
 cd /home/debian/stockscreener
-mkdir -p logs && sudo chown 10001:10001 logs       # la app corre con uid 10001
+mkdir -p data logs && sudo chown 10001:10001 data logs   # la app corre con uid 10001
 docker compose pull && docker compose up -d        # crea la red stockscreener-net
 ```
 
-Si te saltas el `chown`, la app arranca igual pero solo escribe los logs en consola
-(`docker compose logs`), y avisa de ello al arrancar.
+El `chown` es necesario:
+- **Sin él en `data/`**, el contenedor no arranca y `docker compose logs` indica el comando
+  exacto para arreglarlo.
+- **Sin él en `logs/`**, la app arranca igual pero solo escribe los logs en consola.
 
 ### 2. Preparar el proxy
 
@@ -112,7 +115,7 @@ docker compose exec stockscreener python -m app.cli refresh bootstrap    # ~1 ho
 |---|---|---|
 | Actualizar stockscreener | `stockscreener/` | `docker compose pull && docker compose up -d` |
 | Logs del screener | `stockscreener/` | `tail -f logs/app.log` (web, peticiones y tareas programadas) · `logs/cli.log` (comandos) |
-| Copia de seguridad del screener | `stockscreener/` | `docker compose exec stockscreener python -m app.cli backup /data/backup.db && docker compose cp stockscreener:/data/backup.db ./backup-$(date +%F).db` |
+| Copia de seguridad del screener | `stockscreener/` | `docker compose exec stockscreener python -m app.cli backup /data/backup-$(date +%F).db` (queda en `data/`) |
 | Cambiar la configuración de nginx | `edge/` | edita `conf.d/default.conf`, luego `docker compose exec nginx nginx -t && docker compose exec nginx nginx -s reload` |
 | Cambiar la contraseña | `edge/` | vuelve a generar `htpasswd/stockscreener` (paso 2); no hace falta reiniciar |
 | Ver peticiones | `edge/` | `tail -f logs/access.log` |
