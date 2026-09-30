@@ -31,7 +31,6 @@ pueden actualizar, parar o reiniciar por separado:
 └── edge/                    # copia de deploy/edge/ de este repositorio
     ├── docker-compose.yml
     ├── conf.d/default.conf  # rutas de las dos apps
-    ├── htpasswd/            # contraseñas (auth básica)
     └── logs/                # access.log / error.log de nginx
 ```
 
@@ -58,8 +57,6 @@ El `chown` es necesario:
 
 ```bash
 mkdir -p /home/debian/edge && cp -r deploy/edge/. /home/debian/edge/    # desde un clon del repo
-cd /home/debian/edge
-docker run --rm httpd:2.4-alpine htpasswd -nbB TU_USUARIO 'TU_CONTRASEÑA' > htpasswd/stockscreener
 ```
 
 ### 3. Comprobar el nombre de la red de tabbito
@@ -99,7 +96,7 @@ docker compose up -d
 
 Comprueba:
 - `http://<IP>/tabbito/` → el admin de tabbito, igual que antes.
-- `http://<IP>/stockscreener/` → pide usuario y contraseña, y muestra el screener.
+- `http://<IP>/stockscreener/` → el screener.
 
 ### 6. Carga inicial de datos del screener
 
@@ -117,7 +114,6 @@ docker compose exec stockscreener python -m app.cli refresh bootstrap    # ~1 ho
 | Logs del screener | `stockscreener/` | `tail -f logs/app.log` (web, peticiones y tareas programadas) · `logs/cli.log` (comandos) |
 | Copia de seguridad del screener | `stockscreener/` | `docker compose exec stockscreener python -m app.cli backup /data/backup-$(date +%F).db` (queda en `data/`) |
 | Cambiar la configuración de nginx | `edge/` | edita `conf.d/default.conf`, luego `docker compose exec nginx nginx -t && docker compose exec nginx nginx -s reload` |
-| Cambiar la contraseña | `edge/` | vuelve a generar `htpasswd/stockscreener` (paso 2); no hace falta reiniciar |
 | Ver peticiones | `edge/` | `tail -f logs/access.log` |
 
 Para añadir otra app en el futuro:
@@ -128,8 +124,11 @@ Para añadir otra app en el futuro:
 
 ## Notas
 
-- **Plain HTTP.** Por HTTP, la contraseña del screener viaja sin cifrar. Cuando quieras HTTPS,
-  solo hay que tocar `edge/`; las apps no cambian.
+- **Sin autenticación en el proxy.** El proxy no pide contraseña: tabbito usa la suya propia, y
+  el screener queda accesible para cualquiera que conozca la URL. Si más adelante quieres
+  restringirlo, se puede añadir un login en la propia app o limitar `/stockscreener/` por IP en
+  `default.conf`, sin tocar tabbito.
+- **HTTPS.** Cuando quieras HTTPS, solo hay que tocar `edge/`; las apps no cambian.
 - **Nombre `app`.** En `default.conf`, tabbito se alcanza como `app` (el nombre de su servicio).
   Si alguna vez añades al proxy otra red con un servicio que también se llame `app`, usa en su
   lugar el nombre del contenedor (`tabbito-app-1`).

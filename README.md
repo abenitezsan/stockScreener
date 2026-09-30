@@ -68,8 +68,7 @@ los tests en cada push. Si todo pasa, publica la imagen en Docker Hub para
 ### 2. Arrancar en el VPS
 
 En el VPS, un proxy de entrada independiente ([`deploy/edge/`](deploy/edge)) es el único
-contenedor que publica el puerto 80. Reparte `/tabbito/` y `/stockscreener/` (esta última con
-usuario y contraseña) entre las apps, cada una en su propio proyecto de Docker Compose. Los
+contenedor que publica el puerto 80. Reparte `/tabbito/` y `/stockscreener/` entre las apps, cada una en su propio proyecto de Docker Compose. Los
 pasos de la migración están en **[deploy/README.md](deploy/README.md)**.
 
 La imagen corre como usuario sin privilegios, tiene healthcheck en `/health` y aplica
@@ -136,8 +135,10 @@ Cualquier tarea se puede lanzar a mano:
 
 ### Seguridad
 
-La aplicación no tiene login propio. En el VPS la protege la autenticación básica de nginx
-(ver [deploy/README.md](deploy/README.md)). No publiques su puerto directamente.
+La aplicación no tiene login propio, y el proxy tampoco pide contraseña: en el VPS,
+`/stockscreener/` es accesible para cualquiera que conozca la URL. Solo muestra datos de mercado
+y tu lista de seguimiento; si más adelante quieres restringirlo, ver las notas de
+[deploy/README.md](deploy/README.md).
 
 ## Desarrollo
 

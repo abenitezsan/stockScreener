@@ -16,7 +16,6 @@ services:
     volumes:
       # Directorio completo (no ficheros sueltos): los cambios se ven con un simple reload
       - ./conf.d:/etc/nginx/conf.d:ro
-      - ./htpasswd:/etc/nginx/htpasswd:ro
       - ./logs:/var/log/nginx
     networks:
       - tabbito
