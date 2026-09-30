@@ -196,7 +196,8 @@ class Source:
     default: bool = True
 
 
-TICKER_COLUMNS = ("Ticker", "Symbol", "Ticker symbol", "Stock symbol", "EPIC", "Code")
+# "MNEM code": códigos nemotécnicos de Euronext Dublin (ISEQ 20), iguales a los de Yahoo (.IR)
+TICKER_COLUMNS = ("Ticker", "Symbol", "Ticker symbol", "Stock symbol", "EPIC", "Code", "MNEM")
 
 
 def wiki(url: str, suffix: str) -> Source:

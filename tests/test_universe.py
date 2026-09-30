@@ -152,3 +152,12 @@ def test_resolve_company_names_logs_missing(monkeypatch, caplog):
     with caplog.at_level(logging.INFO, logger="app.universe"):
         assert universe.resolve_company_names(["Andritz AG", "Nadie SA"], ".VI") == ["ANDR.VI"]
     assert "1/2" in caplog.text and "Nadie SA" in caplog.text
+
+
+def test_iseq_mnem_code_column():
+    from app.universe import TICKER_COLUMNS
+
+    body = "".join(f"<tr><td>K{i}</td><td>Company {i}</td><td>Ireland</td></tr>" for i in range(12))
+    html = f"<table><tr><th>MNEM code</th><th>Company</th><th>Domicile</th></tr>{body}</table>"
+    symbols = _wiki_symbols(html, TICKER_COLUMNS, lambda t: with_suffix(t, ".IR"))
+    assert symbols[:2] == ["K0.IR", "K1.IR"]
