@@ -8,13 +8,31 @@ Sufijos de Yahoo para los mercados de HeyTrade: .MC Madrid, .DE Xetra, .PA Parí
 import logging
 import math
 from datetime import UTC
+from pathlib import Path
 
 import pandas as pd
 import yfinance as yf
 
+from app.config import get_settings
 from app.providers.base import FinancialsData, HistoryData, ProfileData, QuoteData
 
 log = logging.getLogger(__name__)
+
+
+def _configure_cache() -> None:
+    """Tiene que hacerse antes de la primera petición a Yahoo."""
+    cache_dir = get_settings().cache_dir
+    if not cache_dir:
+        return
+    try:
+        Path(cache_dir).mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        log.warning("No se puede crear la caché de yfinance en %s: %s", cache_dir, exc)
+        return
+    yf.set_tz_cache_location(cache_dir)
+
+
+_configure_cache()
 
 # Campo de Fundamentals -> clave de `Ticker.info`
 INFO_METRICS = {

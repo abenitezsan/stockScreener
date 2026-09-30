@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     growth_cap: float = 0.05
 
     # Descarga de datos
+    # Caché de yfinance (cookies de sesión con Yahoo y zonas horarias). Sin ella, yfinance se
+    # vuelve a autenticar en cada petición. En Docker: /data/.cache (persiste entre reinicios).
+    cache_dir: str | None = None
     request_delay: float = 1.0  # segundos entre peticiones individuales a Yahoo
     batch_size: int = 50  # símbolos por descarga masiva
     scheduler_enabled: bool = True

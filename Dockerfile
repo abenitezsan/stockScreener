@@ -20,7 +20,8 @@ ENV PATH=/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     TZ=Europe/Madrid \
-    DATABASE_URL=sqlite:////data/stockscreener.db
+    DATABASE_URL=sqlite:////data/stockscreener.db \
+    CACHE_DIR=/data/.cache
 RUN useradd --system --uid 10001 --home-dir /app app \
  && mkdir -p /data /app/logs && chown app:app /data /app/logs
 WORKDIR /app

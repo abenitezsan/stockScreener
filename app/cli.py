@@ -5,9 +5,12 @@ import logging
 import sqlite3
 import sys
 
+from sqlalchemy import select
+
 from app import jobs, universe
 from app.db import SessionLocal, engine
 from app.logging_setup import setup_logging
+from app.models import Security
 
 TASKS = {
     "fx": jobs.refresh_fx,
@@ -59,6 +62,20 @@ def main() -> None:
         elif args.command == "add":
             print(universe.upsert_universe(session, universe.MANUAL, args.symbols), "valores")
         elif args.command == "refresh":
+            if args.symbols:
+                args.symbols = [sym.strip().upper() for sym in args.symbols]
+                known = set(
+                    session.scalars(
+                        select(Security.symbol).where(Security.symbol.in_(args.symbols))
+                    )
+                )
+                if missing := sorted(set(args.symbols) - known):
+                    print(
+                        f"No están en el universo: {', '.join(missing)}. "
+                        f"Añádelos antes con: python -m app.cli add {' '.join(missing)}"
+                    )
+                    if not known:
+                        sys.exit(1)
             names = BOOTSTRAP if args.tasks == ["bootstrap"] else args.tasks
             for name in names:
                 task = TASKS[name]
