@@ -45,6 +45,19 @@ def _securities(
     return list(session.scalars(query))
 
 
+class _Progress:
+    """Deja en el log una línea cada `every` valores: una carga completa dura cerca de una hora."""
+
+    def __init__(self, task: str, total: int, every: int = 50):
+        self.task, self.total, self.every, self.done = task, total, every, 0
+        log.info("%s: %d valores", task, total)
+
+    def step(self) -> None:
+        self.done += 1
+        if self.done % self.every == 0 or self.done == self.total:
+            log.info("%s: %d/%d", self.task, self.done, self.total)
+
+
 def _upsert(session: Session, model, rows: list[dict], keys: list[str]) -> None:
     if not rows:
         return
@@ -146,6 +159,7 @@ def refresh_history(
         groups.setdefault(period or ("3mo" if sec.id in with_history else "10y"), []).append(sec)
 
     count = 0
+    progress = _Progress("histórico", len(securities), every=get_settings().batch_size)
     for per, secs in groups.items():
         by_symbol = {s.symbol: s for s in secs}
         for batch in _batches(list(by_symbol), get_settings().batch_size):
@@ -177,6 +191,8 @@ def refresh_history(
                 )
                 count += 1
             session.commit()
+            for _ in batch:
+                progress.step()
     return count
 
 
@@ -190,7 +206,10 @@ def refresh_profiles(
     settings = get_settings()
     fx = latest_fx(session)
     count = 0
-    for sec in _securities(session, symbols):
+    securities = _securities(session, symbols)
+    progress = _Progress("fichas", len(securities))
+    for sec in securities:
+        progress.step()
         try:
             profile = provider.get_profile(sec.symbol)
         except Exception:
@@ -237,7 +256,10 @@ def refresh_financials(
     provider = provider or get_provider()
     delay = get_settings().request_delay
     count = 0
-    for sec in _securities(session, symbols):
+    securities = _securities(session, symbols)
+    progress = _Progress("cuentas", len(securities))
+    for sec in securities:
+        progress.step()
         try:
             periods = provider.get_financials(sec.symbol)
         except Exception:
@@ -269,7 +291,10 @@ def recompute_valuations(session: Session, symbols: Sequence[str] | None = None)
     now = today()
     since = now - timedelta(days=round(365.25 * 11))
     count = 0
-    for sec in _securities(session, symbols):
+    securities = _securities(session, symbols)
+    progress = _Progress("valoración", len(securities), every=250)
+    for sec in securities:
+        progress.step()
         fund = session.get(Fundamentals, sec.id)
         quote = session.get(Quote, sec.id)
         payments = list(
