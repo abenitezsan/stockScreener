@@ -4,13 +4,21 @@ import argparse
 import logging
 import sqlite3
 import sys
+import time
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app import jobs, universe
 from app.db import SessionLocal, engine
 from app.logging_setup import setup_logging
-from app.models import Security
+from app.models import (
+    FinancialsAnnual,
+    Fundamentals,
+    PriceHistory,
+    Quote,
+    Security,
+    Valuation,
+)
 
 TASKS = {
     "fx": jobs.refresh_fx,
@@ -47,6 +55,13 @@ def main() -> None:
     p.add_argument("tasks", nargs="+", choices=[*TASKS, "bootstrap"])
     p.add_argument("--symbols", nargs="*", help="Limitar a estos valores")
 
+    sub.add_parser(
+        "full-load",
+        help="Carga completa: descarga todos los índices y todos los datos (~1-2 h). "
+        "Lánzala en segundo plano y sigue el progreso en logs/cli.log",
+    )
+    sub.add_parser("status", help="Resumen de lo que hay en la base de datos")
+
     p = sub.add_parser("backup", help="Copia consistente de la base de datos (aunque esté en uso)")
     p.add_argument("path", help="Fichero de destino, p. ej. /data/backup-2026-09-27.db")
 
@@ -59,7 +74,11 @@ def main() -> None:
         return
 
     with SessionLocal() as session:
-        if args.command == "universe":
+        if args.command == "full-load":
+            full_load(session)
+        elif args.command == "status":
+            print_status(session)
+        elif args.command == "universe":
             for name, result in universe.sync_sources(session, args.source, args.file).items():
                 print(f"{name}: {result}")
         elif args.command == "import-csv":
@@ -86,6 +105,51 @@ def main() -> None:
                 task = TASKS[name]
                 kwargs = {"symbols": args.symbols} if args.symbols and name != "fx" else {}
                 print(f"{name}: {task(session, **kwargs)}")
+
+
+def full_load(session) -> None:
+    """Universo + bootstrap. Informa por el log (con `exec -d` la salida estándar se pierde)."""
+    log = logging.getLogger("app.cli")
+    start = time.monotonic()
+    log.info("=== Carga completa: 1/2 universo ===")
+    for name, result in universe.sync_sources(session).items():
+        log.info("universo %s: %s", name, result)
+    log.info("=== Carga completa: 2/2 datos de mercado ===")
+    for name in BOOTSTRAP:
+        log.info("%s: %s", name, TASKS[name](session))
+    log.info("=== Carga completa terminada en %d min ===", (time.monotonic() - start) / 60)
+    for line in status_lines(session):
+        log.info(line)
+
+
+def status_lines(session) -> list[str]:
+    def count(query):
+        return session.scalar(query) or 0
+
+    active = count(select(func.count()).select_from(Security).where(Security.active))
+    with_fair_value = (
+        select(func.count()).select_from(Valuation).where(Valuation.fair_value.is_not(None))
+    )
+    lines = [
+        f"valores activos: {active}",
+        f"con ficha: {count(select(func.count()).select_from(Fundamentals))}",
+        f"con histórico: {count(select(func.count(func.distinct(PriceHistory.security_id))))}",
+        f"con cotización: {count(select(func.count()).select_from(Quote))}",
+        f"con cuentas: {count(select(func.count(func.distinct(FinancialsAnnual.security_id))))}",
+        f"valorados: {count(select(func.count()).select_from(Valuation))}",
+        f"con precio justo: {count(with_fair_value)}",
+    ]
+    by_universe: dict[str, int] = {}
+    for tags in session.scalars(select(Security.universes).where(Security.active)):
+        for tag in tags or []:
+            by_universe[tag] = by_universe.get(tag, 0) + 1
+    lines.append("por índice: " + ", ".join(f"{k} {v}" for k, v in sorted(by_universe.items())))
+    return lines
+
+
+def print_status(session) -> None:
+    for line in status_lines(session):
+        print(line)
 
 
 def backup(path: str) -> None:
