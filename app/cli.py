@@ -30,6 +30,11 @@ def main() -> None:
 
     p = sub.add_parser("universe", help="Descarga los índices y actualiza el universo")
     p.add_argument("--source", nargs="*", choices=list(universe.SOURCES))
+    p.add_argument(
+        "--file",
+        help="Leer la fuente de un fichero local en lugar de descargarla (p. ej. el CSV de "
+        "iShares bajado desde el navegador); requiere una sola --source",
+    )
 
     p = sub.add_parser("import-csv", help="Añade valores desde un CSV (columna symbol)")
     p.add_argument("path")
@@ -55,7 +60,7 @@ def main() -> None:
 
     with SessionLocal() as session:
         if args.command == "universe":
-            for name, result in universe.sync_sources(session, args.source).items():
+            for name, result in universe.sync_sources(session, args.source, args.file).items():
                 print(f"{name}: {result}")
         elif args.command == "import-csv":
             print(universe.import_csv(session, args.path, args.universe), "valores")

@@ -41,6 +41,15 @@ HeyTrade no publica su catálogo en un formato descargable. El universo se forma
 
 Cada valor usa su ticker de Yahoo: `AAPL`, `ENB.TO`, `SAN.MC`, `SAP.DE`, `ULVR.L`…
 
+Si una fuente rechaza la descarga (iShares a veces responde 403 a servidores), bájate el fichero
+desde el navegador y cárgalo a mano. En el caso de iShares, es el CSV de posiciones ("Detailed
+Holdings and Analytics") de la página del ETF iShares STOXX Europe 600 (EXSA):
+
+```bash
+docker compose cp EXSA_holdings.csv stockscreener:/tmp/EXSA_holdings.csv
+docker compose exec stockscreener python -m app.cli universe --source STOXX600 --file /tmp/EXSA_holdings.csv
+```
+
 ## Despliegue con Docker (recomendado)
 
 GitHub Actions (`.github/workflows/docker.yml`) ejecuta el lint, comprueba las migraciones y pasa

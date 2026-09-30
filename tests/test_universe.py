@@ -58,3 +58,41 @@ def test_region_and_sector_group():
     assert sector_group("Real Estate", "Real Estate Services") == "general"
     assert sector_group("Financial Services", "Banks - Diversified") == "financials"
     assert sector_group("Energy", "Oil & Gas Integrated") == "cyclical"
+
+
+def _table(header: str, rows: int = 12) -> str:
+    body = "".join(f"<tr><td>Company {i}</td><td>T{i}</td></tr>" for i in range(rows))
+    return f"<table><tr><th>Company</th><th>{header}</th></tr>{body}</table>"
+
+
+def test_wiki_table_column_variants():
+    for header in ("Ticker[14]", "Ticker symbol", "Symbol", "ticker"):
+        assert _wiki_symbols(_table(header), ("Ticker", "Symbol"), us_symbol)[:2] == ["T0", "T1"]
+
+
+def test_wiki_table_error_lists_columns():
+    html = _table("Name") + _table("Ticker", rows=3)  # la segunda es demasiado corta
+    try:
+        _wiki_symbols(html, ("Ticker",), us_symbol)
+    except ValueError as exc:
+        assert "['Company', 'Name']" in str(exc)
+    else:
+        raise AssertionError("debería fallar")
+
+
+def test_sync_sources_from_file(tmp_path, monkeypatch):
+    from app import universe
+
+    csv_file = tmp_path / "EXSA_holdings.csv"
+    csv_file.write_text(
+        "Fund Holdings as of,x\n\nTicker,Name,Asset Class,Exchange\n"
+        "ASML,ASML HOLDING NV,Equity,Euronext Amsterdam\n"
+    )
+    stored = {}
+    monkeypatch.setattr(universe, "fetch", lambda url: (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setattr(
+        universe, "upsert_universe", lambda s, name, symbols: stored.setdefault(name, symbols)
+    )
+    result = universe.sync_sources(None, ["STOXX600"], str(csv_file))
+    assert stored["STOXX600"] == ["ASML.AS"]
+    assert result == {"STOXX600": ["ASML.AS"]}

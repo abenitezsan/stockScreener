@@ -8,11 +8,11 @@ import csv
 import io
 import logging
 import re
-import urllib.request
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 import pandas as pd
+from curl_cffi import requests as cffi_requests
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -21,7 +21,6 @@ from app.models import Security
 
 log = logging.getLogger(__name__)
 
-USER_AGENT = "Mozilla/5.0 (compatible; stockscreener/0.1)"
 MANUAL = "manual"
 
 # Palabra clave de la columna "Exchange" de iShares -> sufijo de Yahoo. El orden importa
@@ -53,9 +52,11 @@ EXCHANGE_SUFFIXES = [
 
 
 def fetch(url: str) -> str:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return response.read().decode("utf-8-sig", errors="replace")
+    """Descarga identificándose como un Chrome real (huella TLS incluida). Algunas webs, como la
+    de iShares, rechazan con 403 las peticiones que no parecen de un navegador."""
+    response = cffi_requests.get(url, impersonate="chrome", timeout=30)
+    response.raise_for_status()
+    return response.content.decode("utf-8-sig", errors="replace")
 
 
 # --- Traducción de tickers -------------------------------------------------------
@@ -82,17 +83,38 @@ def exchange_suffix(exchange: str) -> str | None:
 # --- Fuentes ---------------------------------------------------------------------
 
 
+def _column_name(column) -> str:
+    """'Ticker[12]' -> 'ticker'; 'Ticker symbol' -> 'ticker symbol'."""
+    return re.sub(r"\[.*?\]", "", str(column)).strip().lower()
+
+
 def _wiki_symbols(
     html: str, columns: tuple[str, ...], translate: Callable[[str], str]
 ) -> list[str]:
-    """Busca la primera tabla con alguna de las columnas indicadas y traduce sus tickers."""
+    """Busca la primera tabla con alguna de las columnas indicadas y traduce sus tickers.
+
+    Tolera notas al pie y variantes ("Ticker[a]", "Ticker symbol"). Si no encuentra nada, el
+    error lista las columnas de las tablas de la página para poder ajustar la fuente.
+    """
+    wanted = {c.lower() for c in columns}
+    seen = []
     for table in pd.read_html(io.StringIO(html)):
         if isinstance(table.columns, pd.MultiIndex):
             table.columns = [c[-1] for c in table.columns]
-        column = next((c for c in table.columns if str(c).strip() in columns), None)
-        if column is not None and len(table) >= 10:
+        if len(table) < 10:
+            continue
+        seen.append([str(c) for c in table.columns])
+        column = next(
+            (
+                c
+                for c in table.columns
+                if _column_name(c) in wanted or (_column_name(c).split() or [""])[0] in wanted
+            ),
+            None,
+        )
+        if column is not None:
             return [translate(str(t)) for t in table[column].dropna() if str(t).strip()]
-    raise ValueError(f"No se encontró ninguna tabla con las columnas {columns}")
+    raise ValueError(f"No se encontró ninguna tabla con las columnas {columns}. Tablas: {seen}")
 
 
 def parse_ishares_holdings(text: str) -> list[str]:
@@ -177,13 +199,27 @@ def upsert_universe(session: Session, universe: str, symbols: Iterable[str]) -> 
     return len(wanted)
 
 
-def sync_sources(session: Session, names: Iterable[str] | None = None) -> dict[str, int | str]:
-    """Descarga cada fuente y actualiza el universo. Un fallo en una fuente no para las demás."""
+def sync_sources(
+    session: Session, names: Iterable[str] | None = None, file: str | None = None
+) -> dict[str, int | str]:
+    """Descarga cada fuente y actualiza el universo. Un fallo en una fuente no para las demás.
+
+    Con `file`, el contenido de la (única) fuente se lee de ese fichero en lugar de descargarlo:
+    p. ej. el CSV de iShares bajado a mano desde el navegador.
+    """
+    names = list(names or SOURCES)
+    if file and len(names) != 1:
+        raise ValueError("--file solo se puede usar con una única fuente (--source)")
     result: dict[str, int | str] = {}
-    for name in names or SOURCES:
+    for name in names:
         source = SOURCES[name]
         try:
-            symbols = source.parse(fetch(source.url))
+            if file:
+                with open(file, encoding="utf-8-sig", errors="replace") as f:
+                    content = f.read()
+            else:
+                content = fetch(source.url)
+            symbols = source.parse(content)
         except Exception as exc:
             log.exception("Error cargando %s", name)
             result[name] = f"error: {exc}"
