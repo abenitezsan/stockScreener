@@ -62,13 +62,19 @@ def fetch(url: str) -> str:
 # --- Traducción de tickers -------------------------------------------------------
 
 
+def clean_ticker(ticker: str) -> str:
+    """Quita notas al pie y prefijos de bolsa de Wikipedia: 'LSE: AAL[3]' -> 'AAL'."""
+    ticker = re.sub(r"\[.*?\]", "", str(ticker))
+    return ticker.rsplit(":", 1)[-1].strip().upper()
+
+
 def us_symbol(ticker: str) -> str:
-    return ticker.strip().upper().replace(".", "-")  # BRK.B -> BRK-B
+    return clean_ticker(ticker).replace(".", "-")  # BRK.B -> BRK-B
 
 
 def with_suffix(ticker: str, suffix: str) -> str:
     """ACS -> ACS.MC; NOVO B -> NOVO-B.CO; RR. -> RR.L; BT.A -> BT-A.L; ya con sufijo, igual."""
-    ticker = ticker.strip().upper()
+    ticker = clean_ticker(ticker)
     if ticker.endswith(suffix.upper()):
         return ticker
     ticker = re.sub(r"[.\s/]+", "-", ticker.rstrip(".")).strip("-")
@@ -144,30 +150,53 @@ def parse_ishares_holdings(text: str) -> list[str]:
 class Source:
     url: str
     parse: Callable[[str], list[str]]
+    # False: no se descarga con un `universe` sin --source (p. ej. la web bloquea al servidor)
+    default: bool = True
+
+
+TICKER_COLUMNS = ("Ticker", "Symbol", "Ticker symbol", "Stock symbol", "EPIC", "Code")
+
+
+def wiki(url: str, suffix: str) -> Source:
+    """Página de Wikipedia con una tabla de componentes; los tickers llevan `suffix` en Yahoo."""
+    return Source(
+        f"https://en.wikipedia.org/wiki/{url}",
+        lambda html: _wiki_symbols(html, TICKER_COLUMNS, lambda t: with_suffix(t, suffix)),
+    )
 
 
 SOURCES: dict[str, Source] = {
+    # --- Norteamérica
     "SP500": Source(
         "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies",
         lambda html: _wiki_symbols(html, ("Symbol",), us_symbol),
     ),
-    "NASDAQ100": Source(
-        "https://en.wikipedia.org/wiki/Nasdaq-100",
-        lambda html: _wiki_symbols(html, ("Ticker", "Symbol"), us_symbol),
-    ),
-    "TSX60": Source(
-        "https://en.wikipedia.org/wiki/S%26P/TSX_60",
-        lambda html: _wiki_symbols(html, ("Symbol", "Ticker"), lambda t: with_suffix(t, ".TO")),
-    ),
-    "IBEX35": Source(
-        "https://en.wikipedia.org/wiki/IBEX_35",
-        lambda html: _wiki_symbols(html, ("Ticker", "Symbol"), lambda t: with_suffix(t, ".MC")),
-    ),
+    "TSX60": wiki("S%26P/TSX_60", ".TO"),
+    # --- Europa: índices nacionales de los mercados de HeyTrade (Wikipedia)
+    "IBEX35": wiki("IBEX_35", ".MC"),
+    "DAX": wiki("DAX", ".DE"),
+    "CAC40": wiki("CAC_40", ".PA"),
+    "FTSE100": wiki("FTSE_100_Index", ".L"),
+    "FTSE250": wiki("FTSE_250_Index", ".L"),
+    "AEX": wiki("AEX_index", ".AS"),
+    "BEL20": wiki("BEL_20", ".BR"),
+    "SMI": wiki("Swiss_Market_Index", ".SW"),
+    "FTSEMIB": wiki("FTSE_MIB", ".MI"),
+    "PSI": wiki("PSI-20", ".LS"),
+    "ATX": wiki("Austrian_Traded_Index", ".VI"),
+    "ISEQ20": wiki("ISEQ_20", ".IR"),
+    "OMXS30": wiki("OMX_Stockholm_30", ".ST"),
+    "OMXC25": wiki("OMX_Copenhagen_25", ".CO"),
+    "OMXH25": wiki("OMX_Helsinki_25", ".HE"),
+    "OBX": wiki("OBX_Index", ".OL"),
+    # --- Europa completa (STOXX Europe 600). iShares bloquea las descargas desde servidores:
+    # se carga con el CSV bajado desde el navegador (--source STOXX600 --file ...)
     "STOXX600": Source(
         "https://www.ishares.com/uk/individual/en/products/251931/"
         "ishares-stoxx-europe-600-ucits-etf-de-fund/1506575576011.ajax"
         "?fileType=csv&fileName=EXSA_holdings&dataType=fund",
         parse_ishares_holdings,
+        default=False,
     ),
 }
 
@@ -207,7 +236,7 @@ def sync_sources(
     Con `file`, el contenido de la (única) fuente se lee de ese fichero en lugar de descargarlo:
     p. ej. el CSV de iShares bajado a mano desde el navegador.
     """
-    names = list(names or SOURCES)
+    names = list(names or [n for n, src in SOURCES.items() if src.default])
     if file and len(names) != 1:
         raise ValueError("--file solo se puede usar con una única fuente (--source)")
     result: dict[str, int | str] = {}

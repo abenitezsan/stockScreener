@@ -31,19 +31,24 @@ Londres se pasan de peniques a libras).
 
 ## Universo
 
-HeyTrade no publica su catálogo en un formato descargable. El universo se forma con:
+HeyTrade no publica su catálogo en un formato descargable. `python -m app.cli universe` forma el
+universo con los componentes de los índices principales de sus mercados, sacados de Wikipedia:
 
-- Los componentes de S&P 500, Nasdaq-100, S&P/TSX 60 e IBEX 35 (desde Wikipedia).
-- El STOXX Europe 600, desde la cartera del ETF iShares EXSA. Cubre Madrid, París, Fráncfort,
-  Milán, Ámsterdam, Londres, Zúrich, los mercados nórdicos, Lisboa, Bruselas, Viena y Dublín.
-  Varsovia se omite porque HeyTrade no opera allí.
-- Valores añadidos a mano o desde CSV, para lo que falte.
+| Región | Índices |
+|---|---|
+| EE. UU. y Canadá | S&P 500, S&P/TSX 60 |
+| España | IBEX 35 |
+| Resto de Europa | DAX, CAC 40, FTSE 100, FTSE 250, AEX, BEL 20, SMI, FTSE MIB, PSI, ATX, ISEQ 20, OMX Stockholm 30, OMX Copenhagen 25, OMX Helsinki 25, OBX |
+
+Si una fuente falla, las demás se cargan igual, y el error indica qué tablas encontró en la
+página. Los valores que falten se añaden a mano (`add`) o desde CSV (`import-csv`).
 
 Cada valor usa su ticker de Yahoo: `AAPL`, `ENB.TO`, `SAN.MC`, `SAP.DE`, `ULVR.L`…
 
-Si una fuente rechaza la descarga (iShares a veces responde 403 a servidores), bájate el fichero
-desde el navegador y cárgalo a mano. En el caso de iShares, es el CSV de posiciones ("Detailed
-Holdings and Analytics") de la página del ETF iShares STOXX Europe 600 (EXSA):
+Para ampliar Europa con el STOXX Europe 600 completo (unos 600 valores, incluidas medianas
+empresas): iShares bloquea las descargas desde servidores, así que bájate el CSV de posiciones
+("Detailed Holdings and Analytics") del ETF iShares STOXX Europe 600 (EXSA) desde el navegador y
+cárgalo:
 
 ```bash
 docker compose cp EXSA_holdings.csv stockscreener:/tmp/EXSA_holdings.csv

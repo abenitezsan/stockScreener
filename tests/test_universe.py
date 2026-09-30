@@ -96,3 +96,26 @@ def test_sync_sources_from_file(tmp_path, monkeypatch):
     result = universe.sync_sources(None, ["STOXX600"], str(csv_file))
     assert stored["STOXX600"] == ["ASML.AS"]
     assert result == {"STOXX600": ["ASML.AS"]}
+
+
+def test_clean_ticker_and_european_formats():
+    from app.universe import clean_ticker
+
+    assert clean_ticker("LSE: AAL[3]") == "AAL"
+    assert clean_ticker(" ads ") == "ADS"
+    assert with_suffix("ADS.DE", ".DE") == "ADS.DE"
+    assert with_suffix("Euronext: AI", ".PA") == "AI.PA"
+    assert with_suffix("VOLV B", ".ST") == "VOLV-B.ST"
+    assert us_symbol("NYSE: BRK.B") == "BRK-B"
+
+
+def test_default_sources_skip_blocked_stoxx600(monkeypatch):
+    from app import universe
+
+    fetched = []
+    monkeypatch.setattr(universe, "fetch", lambda url: fetched.append(url) or "")
+    monkeypatch.setattr(universe, "upsert_universe", lambda *a: 0)
+    result = universe.sync_sources(None)
+    assert "STOXX600" not in result
+    assert {"SP500", "TSX60", "IBEX35", "DAX", "FTSE100", "OMXS30"} <= result.keys()
+    assert not any("ishares" in url for url in fetched)
