@@ -26,6 +26,7 @@ def _run(job: Callable[[Session], object]) -> Callable[[], None]:
         except Exception:
             log.exception("Error en %s", job.__name__)
 
+    wrapper.__name__ = wrapper.__qualname__ = job.__name__
     return wrapper
 
 

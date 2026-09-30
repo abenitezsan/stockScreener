@@ -3,9 +3,11 @@
 import argparse
 import logging
 import sqlite3
+import sys
 
 from app import jobs, universe
 from app.db import SessionLocal, engine
+from app.logging_setup import setup_logging
 
 TASKS = {
     "fx": jobs.refresh_fx,
@@ -41,7 +43,8 @@ def main() -> None:
     p.add_argument("path", help="Fichero de destino, p. ej. /data/backup-2026-09-27.db")
 
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    setup_logging("cli.log")
+    logging.getLogger(__name__).info("CLI: %s", " ".join(sys.argv[1:]))
 
     if args.command == "backup":
         backup(args.path)

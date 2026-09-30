@@ -20,8 +20,14 @@ services:
       ROOT_PATH: ${ROOT_PATH:-/stockscreener}
       # Solo le llega tráfico del nginx por la red interna: se aceptan sus cabeceras X-Forwarded-*
       FORWARDED_ALLOW_IPS: "*"
+      # Logs de la app en fichero con rotación (10 MB x 14): app.log (web y tareas
+      # programadas) y cli.log (comandos `python -m app.cli`)
+      LOG_DIR: /app/logs
     volumes:
       - stockscreener-data:/data
+      # Logs en el host, junto a este fichero. La app corre con uid 10001: antes del primer
+      # arranque, `mkdir -p logs && sudo chown 10001:10001 logs` (si no, solo loguea a consola)
+      - ./logs:/app/logs
     networks:
       - stockscreener-net
     # Mismo estilo de límites que tabbito; la app usa ~150-250 MB

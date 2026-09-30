@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     # El proxy quita el prefijo antes de reenviar; la app solo lo usa para generar enlaces.
     root_path: str = ""
 
+    # Logs: siempre a consola; además a fichero (con rotación) si se define LOG_DIR
+    log_dir: str | None = None
+    log_level: str = "INFO"
+    log_max_mb: int = 10
+    log_backups: int = 14
+
     # Valoración (ver docs/valoracion.md)
     valuation_window_years: int = 5
     margin_of_safety: float = 0.10

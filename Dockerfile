@@ -22,7 +22,7 @@ ENV PATH=/venv/bin:$PATH \
     TZ=Europe/Madrid \
     DATABASE_URL=sqlite:////data/stockscreener.db
 RUN useradd --system --uid 10001 --home-dir /app app \
- && mkdir /data && chown app:app /data
+ && mkdir -p /data /app/logs && chown app:app /data /app/logs
 WORKDIR /app
 COPY --from=build /venv /venv
 COPY alembic.ini .
