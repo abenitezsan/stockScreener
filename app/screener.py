@@ -94,6 +94,7 @@ class Filters:
     dgr_min: float | None = None
     years_no_cut_min: int | None = None
     cap_min_bn: float | None = None  # miles de millones de EUR
+    dividend_only: bool = True  # solo empresas que pagan dividendo (TTM > 0)
     quality_only: bool = False
     signal: str = ""
     sort: str = "yield_ttm"
@@ -138,6 +139,8 @@ def _apply_filters(query: Select, f: Filters, with_sector: bool = True) -> Selec
     if f.q:
         pattern = f"%{f.q}%"
         conditions.append(or_(S.symbol.ilike(pattern), S.name.ilike(pattern)))
+    if f.dividend_only:
+        conditions.append(V.dividend_ttm > 0)
     if f.quality_only:
         conditions.append(V.quality_ok.is_(True))
     if f.signal:

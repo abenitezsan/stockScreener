@@ -29,6 +29,7 @@
           {% for key, (icon, label) in SIGNAL_LABELS.items() %}<option value="{{ key }}" {{ 'selected' if filters.signal == key }}>{{ icon }} {{ label }}</option>{% endfor %}
         </select>
       </label>
+      <label><input type="checkbox" name="dividend_only" value="1" {{ 'checked' if filters.dividend_only }}> Solo empresas con dividendo</label>
       <label><input type="checkbox" name="quality_only" value="1" {{ 'checked' if filters.quality_only }}> Solo dividendo sostenible</label>
     </div>
   </details>

@@ -68,7 +68,9 @@ def test_pipeline_populates_valuations(client):
 def test_screener_defaults_and_filters(client):
     page = client.get("/screener")
     assert page.status_code == 200
-    assert "CCC.L" in page.text and "DDD" in page.text  # sin filtros por defecto
+    assert "CCC.L" in page.text and "DDD" not in page.text  # por defecto, solo con dividendo
+    everything = client.get("/screener", params={"submitted": "1"})
+    assert "DDD" in everything.text  # casilla desmarcada: también los que no pagan
     partial = client.get(
         "/screener",
         params={"submitted": "1", "sector": "Utilities", "sort": "pe_ttm", "desc": "0"},

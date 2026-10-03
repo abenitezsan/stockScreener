@@ -200,6 +200,7 @@ def parse_filters(request: Request) -> screener.Filters:
     years = _float(p.get("years_no_cut_min"))
     f.years_no_cut_min = int(years) if years is not None else None
     f.cap_min_bn = _float(p.get("cap_min_bn"))
+    f.dividend_only = p.get("dividend_only") == "1"
     f.quality_only = p.get("quality_only") == "1"
     f.signal = p.get("signal", "") if p.get("signal") in SIGNAL_LABELS else ""
     f.sort = p.get("sort", "yield_ttm") if p.get("sort") in screener.COLUMNS else "yield_ttm"
