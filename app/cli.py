@@ -44,6 +44,13 @@ def main() -> None:
         "iShares bajado desde el navegador); requiere una sola --source",
     )
 
+    p = sub.add_parser(
+        "drop-universe",
+        help="Quita un índice del universo (p. ej. uno que ya no quieres seguir); los valores "
+        "que no estén en ningún otro índice se desactivan, sin borrar su historia",
+    )
+    p.add_argument("name")
+
     p = sub.add_parser("import-csv", help="Añade valores desde un CSV (columna symbol)")
     p.add_argument("path")
     p.add_argument("--universe", default=universe.MANUAL)
@@ -86,6 +93,12 @@ def main() -> None:
         elif args.command == "universe":
             for name, result in universe.sync_sources(session, args.source, args.file).items():
                 print(f"{name}: {result}")
+        elif args.command == "drop-universe":
+            universe.upsert_universe(session, args.name.upper(), [])
+            active = session.scalar(
+                select(func.count()).select_from(Security).where(Security.active)
+            )
+            print(f"Quitado {args.name.upper()}. Valores activos: {active}")
         elif args.command == "import-csv":
             print(universe.import_csv(session, args.path, args.universe), "valores")
         elif args.command == "add":

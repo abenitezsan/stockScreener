@@ -48,8 +48,6 @@ EXCHANGE_SUFFIXES = [
     ("helsinki", ".HE"),
     ("stockholm", ".ST"),
     ("nordic", ".ST"),
-    ("wiener", ".VI"),
-    ("vienna", ".VI"),
 ]
 
 
@@ -119,7 +117,7 @@ def _wiki_symbols(
 ) -> list[str]:
     """Tickers de la tabla de componentes de una página de Wikipedia.
 
-    Si la tabla no trae tickers sino solo nombres de empresa (p. ej. la del ATX), y hay
+    Si la tabla no trae tickers sino solo nombres de empresa, y hay
     `resolve_names`, los nombres se traducen a tickers buscándolos en el proveedor de datos.
     Si no encuentra nada, el error lista las columnas de las tablas de la página.
     """
@@ -231,7 +229,6 @@ SOURCES: dict[str, Source] = {
     "SMI": wiki("Swiss_Market_Index", ".SW"),
     "FTSEMIB": wiki("FTSE_MIB", ".MI"),
     "PSI": wiki("PSI-20", ".LS"),
-    "ATX": wiki("Austrian_Traded_Index", ".VI"),
     "ISEQ20": wiki("ISEQ_20", ".IR"),
     "OMXS30": wiki("OMX_Stockholm_30", ".ST"),
     "OMXC25": wiki("OMX_Copenhagen_25", ".CO"),

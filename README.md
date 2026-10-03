@@ -38,7 +38,7 @@ universo con los componentes de los índices principales de sus mercados, sacado
 |---|---|
 | EE. UU. y Canadá | S&P 500, S&P/TSX 60 |
 | España | IBEX 35 |
-| Resto de Europa | DAX, CAC 40, FTSE 100, FTSE 250, AEX, BEL 20, SMI, FTSE MIB, PSI, ATX, ISEQ 20, OMX Stockholm 30, OMX Copenhagen 25, OMX Helsinki 25, OBX |
+| Resto de Europa | DAX, CAC 40, FTSE 100, FTSE 250, AEX, BEL 20, SMI, FTSE MIB, PSI, ISEQ 20, OMX Stockholm 30, OMX Copenhagen 25, OMX Helsinki 25, OBX |
 
 Si una fuente falla, las demás se cargan igual, y el error indica qué tablas encontró en la
 página. Los valores que falten se añaden a mano (`add`) o desde CSV (`import-csv`).
