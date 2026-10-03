@@ -79,9 +79,35 @@ table.wrap td { white-space: normal; }
 .flag-count.hard { background: rgba(208, 59, 59, 0.15); color: var(--status-critical); }
 
 @media (min-width: 768px) {
+  /* Pico agranda la letra con el ancho de pantalla (hasta 131 %): en PC, tamaño normal y más densidad */
+  :root { --pico-font-size: 100%; }
+  body > main.container, body > header.container { max-width: 1920px; }
+  body > header.container nav { --pico-nav-element-spacing-vertical: 0.4rem; }
+  main.container > h2 { font-size: 1.4rem; margin-bottom: 0.75rem; }
   .sort-mobile, .m-only { display: none; }
   .tabs { flex-wrap: wrap; overflow: visible; }
+  .tabs button { font-size: 0.75rem; padding: 0.2rem 0.55rem; }
+  #filters > input[type=search] { max-width: 28rem; padding-block: 0.35rem; height: auto; font-size: 0.85rem; }
+  .filters-box > summary { min-height: 0; font-size: 0.85rem; }
+  .filters { grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr)); }
+  .filters label, .filters legend { font-size: 0.75rem; }
+  .filters input:not([type=checkbox]), .filters select { font-size: 0.8rem; padding: 0.2rem 0.4rem; margin-bottom: 0.4rem; }
+  .filters [type=checkbox] { width: 1rem; height: 1rem; }
+  .chips label { min-height: 0; }
+
+  /* Lista densa: una línea por valor, todas las métricas a la vista */
+  .screener { font-size: 0.78rem; }
+  .screener th, .screener td { padding: 0.25rem 0.3rem; }
+  .screener th { font-size: 0.72rem; font-weight: 600; vertical-align: bottom; }
+  .screener .tk { gap: 0.3rem; font-size: 0.82rem; }
+  .screener .cflag { font-size: 1em; }
+  .screener td.c-name { max-width: 11rem; overflow: hidden; text-overflow: ellipsis; color: var(--pico-muted-color); }
+  .screener td.c-sector { color: var(--pico-muted-color); }
+  .screener td.c-sector .icon { width: 0.9em; height: 0.9em; }
   .screener td.c-key { font-weight: 600; }
+  .screener .c-sig .signal { font-size: 0.75rem; }
+  .screener button.star { font-size: 0.9rem; padding: 0; }
+  .screener tbody tr:hover td:not(.c-main) { background: var(--pico-primary-focus); }
   /* Al desplazar las columnas extra, el valor queda fijo a la izquierda */
   .screener th.c-main, .screener td.c-main { position: sticky; left: 0; z-index: 1;
                                              background: var(--pico-background-color); box-shadow: 1px 0 0 var(--grid); }
@@ -113,10 +139,10 @@ table.wrap td { white-space: normal; }
   .screener button.star { min-width: 2.75rem; min-height: 2.75rem; margin: -0.6rem -0.6rem 0 0; }
   .screener td.c-key { text-align: left; font-size: 0.95rem; font-weight: 600; }
   .screener td.c-key::before { content: attr(data-label); display: block; font-size: 0.7rem; font-weight: 400; color: var(--ink-muted); }
-  .screener td.c-key:nth-of-type(3) { grid-area: k1; }
-  .screener td.c-key:nth-of-type(4) { grid-area: k2; }
-  .screener td.c-key:nth-of-type(5) { grid-area: k3; }
-  .screener td.c-key:nth-of-type(6) { grid-area: k4; }
+  .screener td.k1 { grid-area: k1; }
+  .screener td.k2 { grid-area: k2; }
+  .screener td.k3 { grid-area: k3; }
+  .screener td.k4 { grid-area: k4; }
   .screener td.c-key.hi { background: var(--hi-bg) !important; border-radius: 0.3rem; padding: 0 0.3rem; margin-left: -0.3rem; }
   .screener td[colspan] { grid-column: 1 / -1; }
 }
@@ -146,4 +172,9 @@ button.star { background: none; border: none; padding: 0 0.2rem; margin: 0; font
 .howto code { font-size: 0.8rem; white-space: nowrap; }
 @media (max-width: 767.98px) {
   main table:not(.screener) th, main table:not(.screener) td { white-space: normal; }
+}
+@media (min-width: 768px) and (max-width: 1599.98px) {
+  /* Pantallas de portátil: nombre más corto para que quepan todas las columnas */
+  .screener td.c-name { max-width: 8rem; }
+  .screener td.c-sector .sector-name { display: none; }
 }
