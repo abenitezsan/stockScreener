@@ -132,3 +132,26 @@ def test_country_flag(client):
     assert country_flag("Spain") == ("\U0001f1ea\U0001f1f8", "España")
     assert country_flag("Narnia") == ("", "Narnia")
     assert country_flag(None) == ("", "País desconocido")
+
+
+def test_detail_explains_hard_flags(client):
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models import Security, Valuation
+
+    assert "Riesgo para el dividendo" not in client.get("/security/AAA").text
+    with SessionLocal() as s:
+        sec = s.scalar(select(Security).where(Security.symbol == "AAA"))
+        v = s.get(Valuation, sec.id)
+        original = v.flags
+        v.flags = [*original, "payout_alto", "fcf_negativo"]
+        s.commit()
+        try:
+            page = client.get("/security/AAA").text
+            assert "Riesgo para el dividendo" in page
+            assert "Payout sobre beneficios alto." in page and "FCF negativo." in page
+            assert "por encima del 70,0 %" in page  # límite del grupo general
+        finally:
+            v.flags = original
+            s.commit()

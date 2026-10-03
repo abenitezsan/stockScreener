@@ -120,6 +120,8 @@ table.wrap td { white-space: normal; }
   body > header.container nav strong { white-space: nowrap; }
   body > header.container nav { --pico-nav-element-spacing-horizontal: 0.35rem; --pico-nav-element-spacing-vertical: 0.5rem; }
   main.container > h2 { font-size: 1.3rem; margin-bottom: 0.75rem; }
+  main.container > hgroup h2 { font-size: 1.25rem; }
+  main.container > hgroup p { font-size: 0.85rem; }
   .overflow-auto { overflow: visible; }
   .screener, .screener tbody { display: block; }
   .screener thead, .screener .x { display: none; }
@@ -178,3 +180,12 @@ button.star { background: none; border: none; padding: 0 0.2rem; margin: 0; font
   .screener td.c-name { max-width: 8rem; }
   .screener td.c-sector .sector-name { display: none; }
 }
+
+/* Ficha del valor: aviso de dividendo en riesgo */
+.warn-title { color: var(--status-critical); }
+.alert-hard { border-left: 4px solid var(--status-critical); background: rgba(208, 59, 59, 0.08); padding: 0.8rem 1rem; font-size: 0.9rem; }
+.alert-hard header { display: flex; align-items: center; gap: 0.4rem; margin: -0.8rem -1rem 0.5rem; padding: 0.5rem 1rem;
+                     background: none; border: 0; font-weight: 700; color: var(--status-critical); }
+.alert-hard p { margin-bottom: 0.4rem; }
+.alert-hard ul { margin: 0; padding-left: 1.2rem; }
+.alert-hard li { margin-bottom: 0.3rem; }

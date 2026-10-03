@@ -11,10 +11,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import screener
+from app.analysis import sectors, valuation
 from app.analysis.dividends import TtmIndex, analyze
 from app.config import get_settings, today
 from app.db import get_session
-from app.models import DividendEvent, PriceHistory, Security, WatchlistItem
+from app.models import DividendEvent, FinancialsAnnual, PriceHistory, Security, WatchlistItem
 
 DbSession = Annotated[Session, Depends(get_session)]
 router = APIRouter()
@@ -46,7 +47,7 @@ SIGNAL_LABELS = {
     "red": ("○", "Cara"),
     "none": ("–", "Sin datos"),
 }
-HARD_FLAGS = {"payout_alto", "payout_fcf_alto", "payout_ocf_alto", "fcf_negativo", "bpa_negativo"}
+HARD_FLAGS = valuation.HARD_FLAGS
 # Sector de Yahoo -> (icono del sprite _icons.html, nombre en castellano)
 SECTORS = {
     "Basic Materials": ("pickaxe", "Materiales"),
@@ -291,8 +292,70 @@ def security_page(request: Request, symbol: str, session: DbSession):
             "watched": session.get(WatchlistItem, sec.id) is not None,
             "settings": get_settings(),
             "chart_data": _chart_data(row, closes, dividends),
+            "hard_reasons": hard_flag_reasons(session, sec, row),
         },
     )
+
+
+def _big(value: float | None, currency: str) -> str:
+    """Importe de las cuentas anuales en millones o miles de millones."""
+    if value is None:
+        return "–"
+    if abs(value) >= 1e9:
+        return f"{_fmt_number(value / 1e9, 1)} mil M {currency}".strip()
+    if abs(value) >= 1e6:
+        return f"{_fmt_number(value / 1e6, 0)} M {currency}".strip()
+    return f"{_fmt_number(value, 0)} {currency}".strip()
+
+
+def hard_flag_reasons(
+    session: Session, sec: Security, row: screener.WatchRow
+) -> list[tuple[str, str]]:
+    """Por qué el dividendo no pasa el filtro de sostenibilidad, con las cifras de cada motivo."""
+    v, f = row.valuation, row.fundamentals
+    flags = [flag for flag in (v.flags if v else []) if flag in HARD_FLAGS]
+    if not flags:
+        return []
+    group = sec.sector_group or sectors.GENERAL
+    eps_limit, fcf_limit, ocf_limit = valuation.PAYOUT_LIMITS[group]
+    group_label = GROUP_LABELS.get(group, group)
+    latest = session.scalar(
+        select(FinancialsAnnual)
+        .where(FinancialsAnnual.security_id == sec.id, FinancialsAnnual.dividends_paid.is_not(None))
+        .order_by(FinancialsAnnual.period_end.desc())
+        .limit(1)
+    )
+    ccy = sec.financial_currency or sec.currency or ""
+    year = latest.period_end.year if latest else "el último ejercicio"
+    paid = _big(latest.dividends_paid if latest else None, ccy)
+    reasons = {
+        "payout_alto": (
+            f"Reparte en dividendos el {fmt(f.payout_ratio if f else None, 'pct')} del beneficio "
+            f"de los últimos 12 meses, por encima del {fmt(eps_limit, 'pct')} que se admite en "
+            f"{group_label.lower()}. Queda poco margen si los beneficios bajan."
+        ),
+        "payout_fcf_alto": (
+            f"En {year} pagó {paid} en dividendos, el {fmt(v.payout_fcf, 'pct')} de su flujo de "
+            f"caja libre ({_big(latest.free_cashflow if latest else None, ccy)}); el límite es "
+            f"{fmt(fcf_limit, 'pct')}. La caja que genera apenas cubre el dividendo."
+        ),
+        "payout_ocf_alto": (
+            f"En {year} pagó {paid} en dividendos, el {fmt(v.payout_ocf, 'pct')} de su flujo "
+            f"operativo ({_big(latest.operating_cashflow if latest else None, ccy)}); el límite "
+            f"para {group_label.lower()} es {fmt(ocf_limit, 'pct')}."
+        ),
+        "fcf_negativo": (
+            f"En {year} su flujo de caja libre fue negativo "
+            f"({_big(latest.free_cashflow if latest else None, ccy)}) y aun así pagó {paid} en "
+            "dividendos: los financió con deuda o con caja acumulada."
+        ),
+        "bpa_negativo": (
+            f"El beneficio por acción de los últimos 12 meses es negativo "
+            f"({fmt(f.eps_ttm if f else None)}): la empresa está en pérdidas y el dividendo no "
+            "tiene beneficios que lo respalden."
+        ),
+    }
+    return [(FLAG_LABELS[flag], reasons[flag]) for flag in flags]
 
 
 def _chart_data(row: screener.WatchRow, closes, dividends) -> dict:

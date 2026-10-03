@@ -4,9 +4,17 @@
 {% block content %}
 {% set v = row.valuation %}{% set f = row.fundamentals %}{% set p = row.price %}
 <hgroup>
-  <h2>{% with id=sec.id, watched=watched %}{% include "_watch_button.html" %}{% endwith %} {{ sec.symbol }} · {{ sec.name or '' }}</h2>
+  <h2>{% with id=sec.id, watched=watched %}{% include "_watch_button.html" %}{% endwith %} {% if hard_reasons %}<svg class="icon warn-title" role="img" aria-label="Riesgo para el dividendo"><title>Riesgo para el dividendo</title><use href="#i-alert"/></svg> {% endif %}{{ sec.symbol }} · {{ sec.name or '' }}</h2>
   <p>{{ sec.sector or '–' }} · {{ sec.industry or '–' }} · {{ sec.country or '–' }} · {{ sec.currency or '' }} · {% with signal=row.signal %}{% include "_signal.html" %}{% endwith %}</p>
 </hgroup>
+
+{% if hard_reasons %}
+<article class="alert-hard" role="note">
+  <header><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg> Riesgo para el dividendo</header>
+  <p>El triángulo rojo indica que el dividendo no pasa el filtro de sostenibilidad de su sector, así que hay más riesgo de recorte. Por eso el semáforo nunca se pone en verde. Motivos:</p>
+  <ul>{% for label, reason in hard_reasons %}<li><strong>{{ label }}.</strong> {{ reason }}</li>{% endfor %}</ul>
+</article>
+{% endif %}
 
 <div class="cards">
   {% macro card(label, value) %}<article><div class="label">{{ label }}</div><div class="value">{{ value }}</div></article>{% endmacro %}
