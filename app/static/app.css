@@ -35,13 +35,91 @@ td.hi { background: var(--hi-bg); }
 table.wrap td { white-space: normal; }
 .muted { color: var(--ink-muted); }
 
-.filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 0 1rem; }
-.filters label { font-size: 0.8rem; }
-.filters input, .filters select { font-size: 0.85rem; padding: 0.3rem 0.5rem; height: auto; margin-bottom: 0.5rem; }
-.range { display: flex; gap: 0.3rem; }
+.icon { width: 1em; height: 1em; vertical-align: -0.125em; flex-shrink: 0; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
-.tabs { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 1rem; }
-.tabs button { font-size: 0.8rem; padding: 0.2rem 0.7rem; margin: 0; }
+/* --- Filtros ---------------------------------------------------------------------- */
+#filters > input[type=search] { margin-bottom: 0.5rem; }
+.filters-box { margin-bottom: 0.5rem; }
+.filters-box > summary { font-size: 0.9rem; font-weight: 600; min-height: 2.75rem; display: flex; align-items: center; gap: 0.4rem; }
+.badge { display: inline-block; min-width: 1.4em; padding: 0 0.4em; border-radius: 1em; font-size: 0.75rem;
+         text-align: center; background: var(--pico-primary-background); color: var(--pico-primary-inverse); }
+.filters { display: grid; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); gap: 0 1rem; }
+.filters label, .filters legend { font-size: 0.8rem; }
+.filters input:not([type=checkbox]), .filters select { font-size: 0.85rem; padding: 0.3rem 0.5rem; height: auto; margin-bottom: 0.5rem; }
+.range { display: flex; gap: 0.3rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 0 0.8rem; margin: 0; }
+.chips legend { width: 100%; }
+.chips label { display: inline-flex; align-items: center; min-height: 2rem; }
+
+/* --- Pestañas de sector y barra de resultados -------------------------------------- */
+.tabs { display: flex; gap: 0.4rem; margin: 0.5rem 0; overflow-x: auto; scrollbar-width: thin; padding-bottom: 0.3rem; }
+.tabs button { font-size: 0.8rem; padding: 0.35rem 0.7rem; margin: 0; white-space: nowrap; display: inline-flex; align-items: center; gap: 0.3rem; }
+.tabs button .muted { color: inherit; opacity: 0.7; }
+.results-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
+.results-bar p { margin: 0; font-size: 0.8rem; }
+.hi-key { background: var(--hi-bg); padding: 0 0.3rem; border-radius: 0.2rem; }
+.sort-mobile { display: flex; align-items: center; gap: 0.4rem; }
+.sort-mobile label { font-size: 0.8rem; margin: 0; }
+.sort-mobile select { font-size: 0.85rem; padding: 0.3rem 2rem 0.3rem 0.5rem; height: 2.75rem; margin: 0; width: auto; }
+.sort-mobile button { margin: 0; height: 2.75rem; min-width: 2.75rem; padding: 0 0.6rem; }
+
+/* --- Tabla del screener ------------------------------------------------------------ */
+.overflow-auto { position: relative; }  /* contiene los .visually-hidden absolutos */
+.screener .tk { display: flex; align-items: center; gap: 0.35rem; }
+.screener .tk a { font-weight: 700; }
+.screener .cflag { font-size: 1.1em; line-height: 1; }
+.screener .ccode { font-size: 0.7rem; }
+.screener .icon.sector { color: var(--ink-muted); }
+.screener .icon.warn { color: var(--status-critical); }
+.screener .nm { font-size: 0.75rem; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
+.screener .c-sig .signal { font-size: 0.8rem; }
+.flag-count { display: inline-flex; align-items: center; gap: 0.2rem; font-size: 0.75rem; padding: 0.05rem 0.4rem;
+              border-radius: 0.3rem; background: var(--hi-bg); cursor: help; }
+.flag-count.hard { background: rgba(208, 59, 59, 0.15); color: var(--status-critical); }
+
+@media (min-width: 768px) {
+  .sort-mobile, .m-only { display: none; }
+  .tabs { flex-wrap: wrap; overflow: visible; }
+  .screener td.c-key { font-weight: 600; }
+  /* Al desplazar las columnas extra, el valor queda fijo a la izquierda */
+  .screener th.c-main, .screener td.c-main { position: sticky; left: 0; z-index: 1;
+                                             background: var(--pico-background-color); box-shadow: 1px 0 0 var(--grid); }
+  .screener tbody tr:nth-child(odd) td.c-main { background: linear-gradient(var(--pico-table-row-stripped-background-color), var(--pico-table-row-stripped-background-color)), var(--pico-background-color); }
+}
+
+/* Móvil: cada fila es una tarjeta con lo esencial; el resto, en la ficha del valor */
+@media (max-width: 767.98px) {
+  body > header.container nav { font-size: 0.85rem; }
+  body > header.container nav strong { white-space: nowrap; }
+  body > header.container nav { --pico-nav-element-spacing-horizontal: 0.35rem; --pico-nav-element-spacing-vertical: 0.5rem; }
+  main.container > h2 { font-size: 1.3rem; margin-bottom: 0.75rem; }
+  .overflow-auto { overflow: visible; }
+  .screener, .screener tbody { display: block; }
+  .screener thead, .screener .x { display: none; }
+  .screener tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; position: relative;
+                 grid-template-areas: "main main main sig star" "k1 k2 k3 k4 k4";
+                 column-gap: 0.5rem; row-gap: 0.4rem; padding: 0.7rem 0.75rem;
+                 border-bottom: 1px solid var(--grid); }
+  .screener td { display: block; padding: 0; border: 0; background: none !important; white-space: normal; }
+  .screener tr:nth-child(odd) { background: var(--pico-table-row-stripped-background-color); }
+  .screener td.c-main { grid-area: main; min-width: 0; }
+  .screener .tk { font-size: 1rem; }
+  /* Toda la tarjeta lleva a la ficha; la estrella queda por encima */
+  .screener .tk a::after { content: ""; position: absolute; inset: 0; }
+  .screener .nm { max-width: none; white-space: nowrap; }
+  .screener td.c-sig { grid-area: sig; justify-self: end; align-self: start; }
+  .screener td.c-star { grid-area: star; align-self: start; position: relative; z-index: 1; }
+  .screener button.star { min-width: 2.75rem; min-height: 2.75rem; margin: -0.6rem -0.6rem 0 0; }
+  .screener td.c-key { text-align: left; font-size: 0.95rem; font-weight: 600; }
+  .screener td.c-key::before { content: attr(data-label); display: block; font-size: 0.7rem; font-weight: 400; color: var(--ink-muted); }
+  .screener td.c-key:nth-of-type(3) { grid-area: k1; }
+  .screener td.c-key:nth-of-type(4) { grid-area: k2; }
+  .screener td.c-key:nth-of-type(5) { grid-area: k3; }
+  .screener td.c-key:nth-of-type(6) { grid-area: k4; }
+  .screener td.c-key.hi { background: var(--hi-bg) !important; border-radius: 0.3rem; padding: 0 0.3rem; margin-left: -0.3rem; }
+  .screener td[colspan] { grid-column: 1 / -1; }
+}
 
 .signal { display: inline-flex; align-items: center; gap: 0.3rem; font-weight: 600; }
 .signal.green { color: var(--status-good); }
@@ -59,3 +137,13 @@ button.star { background: none; border: none; padding: 0 0.2rem; margin: 0; font
 .cards .value { font-size: 1.4rem; font-weight: 600; }
 .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: 1rem; }
 .chart { position: relative; height: 16rem; }
+
+/* Ficha del valor: explicación del cálculo del precio justo */
+.howto { font-size: 0.85rem; }
+.howto summary { font-weight: 600; }
+.howto ol { padding-left: 1.2rem; }
+.howto li { margin-bottom: 0.4rem; }
+.howto code { font-size: 0.8rem; white-space: nowrap; }
+@media (max-width: 767.98px) {
+  main table:not(.screener) th, main table:not(.screener) td { white-space: normal; }
+}

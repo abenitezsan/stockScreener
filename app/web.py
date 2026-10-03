@@ -46,6 +46,74 @@ SIGNAL_LABELS = {
     "red": ("○", "Cara"),
     "none": ("–", "Sin datos"),
 }
+HARD_FLAGS = {"payout_alto", "payout_fcf_alto", "payout_ocf_alto", "fcf_negativo", "bpa_negativo"}
+# Sector de Yahoo -> (icono del sprite _icons.html, nombre en castellano)
+SECTORS = {
+    "Basic Materials": ("pickaxe", "Materiales"),
+    "Communication Services": ("radio-tower", "Comunicaciones"),
+    "Consumer Cyclical": ("shopping-bag", "Consumo cíclico"),
+    "Consumer Defensive": ("shopping-cart", "Consumo defensivo"),
+    "Energy": ("flame", "Energía"),
+    "Financial Services": ("landmark", "Financieras"),
+    "Healthcare": ("heart-pulse", "Salud"),
+    "Industrials": ("factory", "Industria"),
+    "Real Estate": ("building", "Inmobiliario"),
+    "Technology": ("cpu", "Tecnología"),
+    "Utilities": ("zap", "Utilities"),
+}
+# País de Yahoo -> (código ISO, nombre en castellano). Los no listados se muestran en texto.
+COUNTRIES = {
+    "United States": ("US", "EE. UU."),
+    "Canada": ("CA", "Canadá"),
+    "United Kingdom": ("GB", "Reino Unido"),
+    "Ireland": ("IE", "Irlanda"),
+    "Germany": ("DE", "Alemania"),
+    "France": ("FR", "Francia"),
+    "Spain": ("ES", "España"),
+    "Portugal": ("PT", "Portugal"),
+    "Italy": ("IT", "Italia"),
+    "Netherlands": ("NL", "Países Bajos"),
+    "Belgium": ("BE", "Bélgica"),
+    "Luxembourg": ("LU", "Luxemburgo"),
+    "Switzerland": ("CH", "Suiza"),
+    "Austria": ("AT", "Austria"),
+    "Sweden": ("SE", "Suecia"),
+    "Norway": ("NO", "Noruega"),
+    "Denmark": ("DK", "Dinamarca"),
+    "Finland": ("FI", "Finlandia"),
+    "Iceland": ("IS", "Islandia"),
+    "Poland": ("PL", "Polonia"),
+    "Czech Republic": ("CZ", "Chequia"),
+    "Greece": ("GR", "Grecia"),
+    "Cyprus": ("CY", "Chipre"),
+    "Malta": ("MT", "Malta"),
+    "Hungary": ("HU", "Hungría"),
+    "Jersey": ("JE", "Jersey"),
+    "Guernsey": ("GG", "Guernsey"),
+    "Isle of Man": ("IM", "Isla de Man"),
+    "Bermuda": ("BM", "Bermudas"),
+    "Cayman Islands": ("KY", "Islas Caimán"),
+    "Puerto Rico": ("PR", "Puerto Rico"),
+    "Mexico": ("MX", "México"),
+    "Brazil": ("BR", "Brasil"),
+    "Chile": ("CL", "Chile"),
+    "Israel": ("IL", "Israel"),
+    "Australia": ("AU", "Australia"),
+    "Japan": ("JP", "Japón"),
+    "China": ("CN", "China"),
+    "Hong Kong": ("HK", "Hong Kong"),
+    "Singapore": ("SG", "Singapur"),
+    "Taiwan": ("TW", "Taiwán"),
+    "South Korea": ("KR", "Corea del Sur"),
+    "India": ("IN", "India"),
+    "South Africa": ("ZA", "Sudáfrica"),
+    "Monaco": ("MC", "Mónaco"),
+    "Uruguay": ("UY", "Uruguay"),
+    "Argentina": ("AR", "Argentina"),
+    "Peru": ("PE", "Perú"),
+    "Colombia": ("CO", "Colombia"),
+    "Panama": ("PA", "Panamá"),
+}
 
 
 def _fmt_number(value, digits: int = 2) -> str:
@@ -75,11 +143,26 @@ def fmt(value, kind: str = "money") -> str:
             return _fmt_number(value, 2)
 
 
+def country_flag(country: str | None) -> tuple[str, str]:
+    """(bandera emoji, nombre) de un país de Yahoo; sin código conocido, texto sin bandera."""
+    if not country:
+        return "", "País desconocido"
+    code, name = COUNTRIES.get(country, ("", country))
+    # Bandera = par de "regional indicator symbols" a partir del código ISO
+    return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in code), name
+
+
 templates.env.filters["fmt"] = fmt
+templates.env.filters["country_flag"] = country_flag
+templates.env.filters["flag_labels"] = lambda flags: "; ".join(
+    FLAG_LABELS.get(f, f) for f in flags or []
+)
 ROOT = get_settings().root_path.rstrip("/")
 templates.env.globals.update(
     ROOT=ROOT,
     FLAG_LABELS=FLAG_LABELS,
+    HARD_FLAGS=HARD_FLAGS,
+    SECTORS=SECTORS,
     GROUP_LABELS=GROUP_LABELS,
     SIGNAL_LABELS=SIGNAL_LABELS,
     COLUMNS=screener.COLUMNS,
@@ -117,6 +200,7 @@ def parse_filters(request: Request) -> screener.Filters:
     years = _float(p.get("years_no_cut_min"))
     f.years_no_cut_min = int(years) if years is not None else None
     f.cap_min_bn = _float(p.get("cap_min_bn"))
+    f.dividend_only = p.get("dividend_only") == "1"
     f.quality_only = p.get("quality_only") == "1"
     f.signal = p.get("signal", "") if p.get("signal") in SIGNAL_LABELS else ""
     f.sort = p.get("sort", "yield_ttm") if p.get("sort") in screener.COLUMNS else "yield_ttm"
@@ -129,7 +213,13 @@ def _screener_context(session: Session, f: screener.Filters) -> dict:
         "filters": f,
         "rows": screener.screen(session, f),
         "sectors": screener.sector_counts(session, f),
-        "columns": screener.SCREENER_COLUMNS,
+        "key_columns": screener.SCREENER_KEY_COLUMNS,
+        "extra_columns": [
+            c
+            for c in screener.SCREENER_COLUMNS
+            if c not in screener.SCREENER_KEY_COLUMNS
+            and c not in ("symbol", "name", "sector", "country")
+        ],
         "watched": screener.watchlist_ids(session),
     }
 

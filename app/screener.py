@@ -53,26 +53,30 @@ SIGNAL = case(
     else_=literal("red"),
 )
 
+# Orden de la tabla: identificación y las métricas clave primero (las que se ven en móvil)
 SCREENER_COLUMNS = [
     "symbol",
     "name",
+    "sector",
     "country",
-    "price",
     "yield_ttm",
+    "price",
+    "dgr_5y",
+    "fair_value",
+    "upside",
+    "buy_price",
     "yield_fwd",
     "yield_avg_5y",
     "pe_ttm",
     "pe_fwd",
     "payout",
     "payout_fcf",
-    "dgr_5y",
     "years_no_cut",
     "chowder",
     "total_return",
-    "fair_value",
-    "buy_price",
-    "upside",
 ]
+# Columnas que se muestran en la propia celda del valor o como tarjeta en móvil
+SCREENER_KEY_COLUMNS = ["yield_ttm", "price", "dgr_5y", "fair_value"]
 REGIONS = {"US": "EE. UU.", "CA": "Canadá", "EU": "Europa"}
 
 
@@ -82,14 +86,15 @@ class Filters:
     regions: list[str] = field(default_factory=list)
     q: str = ""
     # En %, como se escriben en el formulario
-    yield_avg_min: float | None = 3.0
-    yield_avg_max: float | None = 6.0
+    yield_avg_min: float | None = None
+    yield_avg_max: float | None = None
     yield_min: float | None = None
     yield_max: float | None = None
     payout_max: float | None = None
     dgr_min: float | None = None
     years_no_cut_min: int | None = None
     cap_min_bn: float | None = None  # miles de millones de EUR
+    dividend_only: bool = True  # solo empresas que pagan dividendo (TTM > 0)
     quality_only: bool = False
     signal: str = ""
     sort: str = "yield_ttm"
@@ -134,6 +139,8 @@ def _apply_filters(query: Select, f: Filters, with_sector: bool = True) -> Selec
     if f.q:
         pattern = f"%{f.q}%"
         conditions.append(or_(S.symbol.ilike(pattern), S.name.ilike(pattern)))
+    if f.dividend_only:
+        conditions.append(V.dividend_ttm > 0)
     if f.quality_only:
         conditions.append(V.quality_ok.is_(True))
     if f.signal:

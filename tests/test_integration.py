@@ -68,7 +68,9 @@ def test_pipeline_populates_valuations(client):
 def test_screener_defaults_and_filters(client):
     page = client.get("/screener")
     assert page.status_code == 200
-    assert "CCC.L" in page.text and "DDD" not in page.text  # DDD no paga dividendo
+    assert "CCC.L" in page.text and "DDD" not in page.text  # por defecto, solo con dividendo
+    everything = client.get("/screener", params={"submitted": "1"})
+    assert "DDD" in everything.text  # casilla desmarcada: también los que no pagan
     partial = client.get(
         "/screener",
         params={"submitted": "1", "sector": "Utilities", "sort": "pe_ttm", "desc": "0"},
@@ -122,3 +124,11 @@ def test_universe_tags(client):
         assert ddd.universes == [] and ddd.active is False
         s.refresh(aaa)
         assert aaa.universes == ["manual"] and aaa.active
+
+
+def test_country_flag(client):
+    from app.web import country_flag
+
+    assert country_flag("Spain") == ("\U0001f1ea\U0001f1f8", "España")
+    assert country_flag("Narnia") == ("", "Narnia")
+    assert country_flag(None) == ("", "País desconocido")
