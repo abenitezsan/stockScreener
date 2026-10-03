@@ -41,6 +41,30 @@
       <tr><td><strong>Precio de compra</strong></td><td class="num"><strong>{{ row.buy_price | fmt }}</strong></td><td></td></tr>
     </tbody>
   </table>
+  {% set applied = [] %}
+  {% for label, value in [('1. Banda de yield', v.fv_yield if v), ('2. PER histórico', v.fv_pe if v),
+                          ('3. Chowder', v.fv_chowder if v), ('5. Gordon', v.fv_gordon if v)] %}{% if value %}{% set _ = applied.append(label ~ ' (' ~ value | fmt ~ ')') %}{% endif %}{% endfor %}
+  <details class="howto">
+    <summary>¿Cómo se calcula el precio justo?</summary>
+    <p>El <strong>precio justo</strong> es la <strong>mediana</strong> de los métodos 1, 2, 3 y 5 que se pueden aplicar.
+      {% if applied %}Aquí se aplican {{ applied | length }} de 4: {{ applied | join(', ') }} → <strong>{{ (v.fair_value if v) | fmt }}</strong>.{% else %}A este valor no se le puede aplicar ninguno.{% endif %}</p>
+    <ol>
+      <li><strong>Banda de yield:</strong> precio al que el dividendo actual rendiría su yield media de los últimos {{ settings.valuation_window_years }} años.
+        <code>D ÷ yield media</code>. Necesita al menos 3 años de dividendos.</li>
+      <li><strong>PER histórico:</strong> el beneficio esperado valorado al PER medio de la empresa.
+        <code>BPA estimado × PER medio</code>. Solo con BPA positivo; no se usa en REITs.</li>
+      <li><strong>Chowder:</strong> precio al que yield + crecimiento del dividendo alcanzan un umbral.
+        <code>D ÷ (umbral − crec. 5a)</code>. Umbral del 12 % (15 % si la yield es menor del 3 %; 8 % en utilities con yield de al menos un 4 %).</li>
+      <li><strong>Rentabilidad objetivo:</strong> precio máximo para que yield estimada + crecimiento den un {{ row.target_total_return | fmt('pct') }} anual.
+        <code>D₁ ÷ (objetivo − g)</code>. No entra en la mediana: es un techo del precio de compra.</li>
+      <li><strong>Gordon:</strong> valor actual de un dividendo que crece para siempre a ritmo g.
+        <code>D₁ ÷ (r − g)</code>, con r = {{ settings.gordon_discount_rate | fmt('pct') }}. Solo en sectores estables (utilities, telecos, consumo básico y REITs).</li>
+    </ol>
+    <p><strong>Precio de compra</strong> = el menor entre precio justo × (1 − margen de seguridad {{ row.margin_of_safety | fmt('pct') }}) y el precio máximo del método 4.</p>
+    <p class="muted"><small>D = dividendo ordinario de los últimos 12 meses ({{ (v.dividend_ttm if v) | fmt }}).
+      g = crecimiento del dividendo a 5 años limitado entre 0 y {{ settings.growth_cap | fmt('pct') }} ({{ (v.growth_used if v) | fmt('pct') }}).
+      D₁ = D × (1 + g) ({{ (v.dividend_forward if v) | fmt }}).</small></p>
+  </details>
 </section>
 <section>
   <h4>Sostenibilidad del dividendo</h4>

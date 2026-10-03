@@ -86,8 +86,8 @@ class Filters:
     regions: list[str] = field(default_factory=list)
     q: str = ""
     # En %, como se escriben en el formulario
-    yield_avg_min: float | None = 3.0
-    yield_avg_max: float | None = 6.0
+    yield_avg_min: float | None = None
+    yield_avg_max: float | None = None
     yield_min: float | None = None
     yield_max: float | None = None
     payout_max: float | None = None

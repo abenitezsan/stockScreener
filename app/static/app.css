@@ -137,3 +137,13 @@ button.star { background: none; border: none; padding: 0 0.2rem; margin: 0; font
 .cards .value { font-size: 1.4rem; font-weight: 600; }
 .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: 1rem; }
 .chart { position: relative; height: 16rem; }
+
+/* Ficha del valor: explicación del cálculo del precio justo */
+.howto { font-size: 0.85rem; }
+.howto summary { font-weight: 600; }
+.howto ol { padding-left: 1.2rem; }
+.howto li { margin-bottom: 0.4rem; }
+.howto code { font-size: 0.8rem; white-space: nowrap; }
+@media (max-width: 767.98px) {
+  main table:not(.screener) th, main table:not(.screener) td { white-space: normal; }
+}
