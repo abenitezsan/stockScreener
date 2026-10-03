@@ -32,6 +32,7 @@
   <thead><tr>
     <th class="c-star"><span class="visually-hidden">Seguimiento</span></th>
     <th class="c-main"><a class="sort" onclick="sortBy('symbol')">Valor{% if filters.sort == 'symbol' %} {{ '▼' if filters.desc else '▲' }}{% endif %}</a></th>
+    {% for col, label in [('name', 'Empresa'), ('sector', 'Sector')] %}<th class="x"><a class="sort" onclick="sortBy('{{ col }}')">{{ label }}{% if filters.sort == col %} {{ '▼' if filters.desc else '▲' }}{% endif %}</a></th>{% endfor %}
     {% for col in key_columns %}{{ th(col, 'c-key') }}{% endfor %}
     <th class="c-sig">Señal</th>
     {% for col in extra_columns %}{{ th(col, 'x') }}{% endfor %}
@@ -48,13 +49,15 @@
         <div class="tk">
           {% if flag %}<span class="cflag" role="img" aria-label="{{ country }}" title="{{ country }}">{{ flag }}</span>{% elif row.country %}<span class="ccode muted" title="{{ country }}">{{ row.country[:3] }}</span>{% endif %}
           <a href="{{ ROOT }}/security/{{ row.symbol }}">{{ row.symbol }}</a>
-          {{ sector_icon(row.sector, "icon sector") }}
+          {{ sector_icon(row.sector, "icon sector m-only") }}
           {% if hard %}<svg class="icon warn m-only" role="img" aria-label="{{ flag_text }}"><title>{{ flag_text }}</title><use href="#i-alert"/></svg>{% endif %}
         </div>
-        <div class="nm muted" title="{{ row.name or '' }}">{{ row.name or '–' }}</div>
+        <div class="nm muted m-only" title="{{ row.name or '' }}">{{ row.name or '–' }}</div>
       </td>
+      <td class="x c-name" title="{{ row.name or '' }}">{{ row.name or '–' }}</td>
+      <td class="x c-sector">{% if row.sector %}{{ sector_icon(row.sector) }} <span class="sector-name">{{ SECTORS.get(row.sector, (none, row.sector))[1] }}</span>{% else %}–{% endif %}</td>
       {% for col in key_columns %}{% set value = row[col] %}
-      <td class="num c-key{{ ' hi' if col == 'yield_ttm' and value and value > 0.06 }}" data-label="{{ SHORT[col] }}">{{ value | fmt(COLUMNS[col][2]) }}</td>
+      <td class="num c-key k{{ loop.index }}{{ ' hi' if col == 'yield_ttm' and value and value > 0.06 }}" data-label="{{ SHORT[col] }}">{{ value | fmt(COLUMNS[col][2]) }}</td>
       {% endfor %}
       <td class="c-sig">{% with signal=row.signal %}{% include "_signal.html" %}{% endwith %}</td>
       {% for col in extra_columns %}
@@ -63,7 +66,7 @@
       <td class="x">{% if flag_text %}<span class="flag-count{{ ' hard' if hard }}" title="{{ flag_text }}"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>{{ row.flags | length }}<span class="visually-hidden">: {{ flag_text }}</span></span>{% endif %}</td>
     </tr>
   {% else %}
-    <tr><td colspan="{{ key_columns | length + extra_columns | length + 4 }}">Ningún valor cumple los filtros. Si la base de datos está vacía, ejecuta la carga inicial (ver README).</td></tr>
+    <tr><td colspan="{{ key_columns | length + extra_columns | length + 6 }}">Ningún valor cumple los filtros. Si la base de datos está vacía, ejecuta la carga inicial (ver README).</td></tr>
   {% endfor %}
   </tbody>
 </table>
