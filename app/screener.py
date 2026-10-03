@@ -53,26 +53,30 @@ SIGNAL = case(
     else_=literal("red"),
 )
 
+# Orden de la tabla: identificación y las métricas clave primero (las que se ven en móvil)
 SCREENER_COLUMNS = [
     "symbol",
     "name",
+    "sector",
     "country",
-    "price",
     "yield_ttm",
+    "price",
+    "dgr_5y",
+    "fair_value",
+    "upside",
+    "buy_price",
     "yield_fwd",
     "yield_avg_5y",
     "pe_ttm",
     "pe_fwd",
     "payout",
     "payout_fcf",
-    "dgr_5y",
     "years_no_cut",
     "chowder",
     "total_return",
-    "fair_value",
-    "buy_price",
-    "upside",
 ]
+# Columnas que se muestran en la propia celda del valor o como tarjeta en móvil
+SCREENER_KEY_COLUMNS = ["yield_ttm", "price", "dgr_5y", "fair_value"]
 REGIONS = {"US": "EE. UU.", "CA": "Canadá", "EU": "Europa"}
 
 

@@ -1,33 +1,69 @@
+{# Encabezados cortos; el nombre completo queda en el title. En móvil cada fila es una tarjeta. #}
+{% set SHORT = {
+  "yield_ttm": "Yield", "price": "Precio", "dgr_5y": "Crec. 5a", "fair_value": "P. justo",
+  "upside": "Potenc.", "buy_price": "P. compra", "yield_fwd": "Yield est.", "yield_avg_5y": "Yield 5a",
+  "pe_ttm": "PER", "pe_fwd": "PER est.", "payout": "Payout", "payout_fcf": "Pay. FCF",
+  "years_no_cut": "Sin recorte", "chowder": "Chowder", "total_return": "Rent. est.",
+} %}
+{% macro sector_icon(sector, cls="icon") %}{% set icon, label = SECTORS.get(sector, ("help", sector or "Sin sector")) %}<svg class="{{ cls }}" role="img" aria-label="{{ label }}"><title>{{ label }}</title><use href="#i-{{ icon }}"/></svg>{% endmacro %}
+{% macro th(col, cls="") %}<th class="num {{ cls }}"><a class="sort" onclick="sortBy('{{ col }}')" title="{{ COLUMNS[col][0] }}">{{ SHORT[col] }}{% if filters.sort == col %} {{ '▼' if filters.desc else '▲' }}{% endif %}</a></th>{% endmacro %}
+
 <div class="tabs" role="tablist">
   <button type="button" class="{{ '' if not filters.sector else 'outline' }}" onclick="setFilter('sector', '')">Todos</button>
   {% for sector, count in sectors %}
-  <button type="button" class="{{ '' if filters.sector == sector else 'outline' }}" onclick="setFilter('sector', {{ sector | tojson | forceescape }})">{{ sector }} <span class="muted">{{ count }}</span></button>
+  <button type="button" class="{{ '' if filters.sector == sector else 'outline' }}" onclick="setFilter('sector', {{ sector | tojson | forceescape }})">{{ sector_icon(sector) }} {{ SECTORS.get(sector, (none, sector))[1] }} <span class="muted">{{ count }}</span></button>
   {% endfor %}
 </div>
-<p class="muted">{{ rows | length }} valores{% if rows | length >= 500 %} (mostrando los 500 primeros){% endif %}. Las celdas resaltadas tienen una yield actual superior al 6 %.</p>
+
+<div class="results-bar">
+  <p class="muted">{{ rows | length }} valores{% if rows | length >= 500 %} (500 primeros){% endif %} · <span class="hi-key">yield &gt; 6 %</span></p>
+  <div class="sort-mobile">
+    <label for="sort-select" class="muted">Ordenar</label>
+    <select id="sort-select" onchange="setFilter('sort', this.value)">
+      {% for col in key_columns + extra_columns %}<option value="{{ col }}" {{ 'selected' if filters.sort == col }}>{{ COLUMNS[col][0] }}</option>{% endfor %}
+    </select>
+    <button type="button" class="outline" onclick="setFilter('desc', '{{ '0' if filters.desc else '1' }}')"
+            aria-label="{{ 'Descendente; cambiar a ascendente' if filters.desc else 'Ascendente; cambiar a descendente' }}">{{ '▼' if filters.desc else '▲' }}</button>
+  </div>
+</div>
+
 <div class="overflow-auto">
-<table class="striped">
+<table class="striped screener">
   <thead><tr>
-    <th></th>
-    {% for col in columns %}{% set label, _, kind = COLUMNS[col] %}
-    <th class="{{ 'num' if kind not in ('text',) }}"><a class="sort" onclick="sortBy('{{ col }}')">{{ label }}{% if filters.sort == col %} {{ '▼' if filters.desc else '▲' }}{% endif %}</a></th>
-    {% endfor %}
-    <th>Semáforo</th><th>Avisos</th>
+    <th class="c-star"><span class="visually-hidden">Seguimiento</span></th>
+    <th class="c-main"><a class="sort" onclick="sortBy('symbol')">Valor{% if filters.sort == 'symbol' %} {{ '▼' if filters.desc else '▲' }}{% endif %}</a></th>
+    {% for col in key_columns %}{{ th(col, 'c-key') }}{% endfor %}
+    <th class="c-sig">Señal</th>
+    {% for col in extra_columns %}{{ th(col, 'x') }}{% endfor %}
+    <th class="x">Avisos</th>
   </tr></thead>
   <tbody>
   {% for row in rows %}
+    {% set flag, country = row.country | country_flag %}
+    {% set hard = row.flags and row.flags | select('in', HARD_FLAGS) | list %}
+    {% set flag_text = row.flags | flag_labels %}
     <tr>
-      <td>{% with id=row.id, watched=row.id in watched %}{% include "_watch_button.html" %}{% endwith %}</td>
-      {% for col in columns %}{% set _, _, kind = COLUMNS[col] %}{% set value = row[col] %}
-        {% if col == 'symbol' %}<td><a href="{{ ROOT }}/security/{{ value }}">{{ value }}</a></td>
-        {% elif col == 'name' %}<td class="name" title="{{ value or '' }}">{{ value or '–' }}</td>
-        {% else %}<td class="{{ 'num' if kind != 'text' }}{{ ' hi' if col == 'yield_ttm' and value and value > 0.06 }}">{{ value | fmt(kind) }}</td>{% endif %}
+      <td class="c-star">{% with id=row.id, watched=row.id in watched %}{% include "_watch_button.html" %}{% endwith %}</td>
+      <td class="c-main">
+        <div class="tk">
+          {% if flag %}<span class="cflag" role="img" aria-label="{{ country }}" title="{{ country }}">{{ flag }}</span>{% elif row.country %}<span class="ccode muted" title="{{ country }}">{{ row.country[:3] }}</span>{% endif %}
+          <a href="{{ ROOT }}/security/{{ row.symbol }}">{{ row.symbol }}</a>
+          {{ sector_icon(row.sector, "icon sector") }}
+          {% if hard %}<svg class="icon warn m-only" role="img" aria-label="{{ flag_text }}"><title>{{ flag_text }}</title><use href="#i-alert"/></svg>{% endif %}
+        </div>
+        <div class="nm muted" title="{{ row.name or '' }}">{{ row.name or '–' }}</div>
+      </td>
+      {% for col in key_columns %}{% set value = row[col] %}
+      <td class="num c-key{{ ' hi' if col == 'yield_ttm' and value and value > 0.06 }}" data-label="{{ SHORT[col] }}">{{ value | fmt(COLUMNS[col][2]) }}</td>
       {% endfor %}
-      <td>{% with signal=row.signal %}{% include "_signal.html" %}{% endwith %}</td>
-      <td>{% with flags=row.flags %}{% include "_flags.html" %}{% endwith %}</td>
+      <td class="c-sig">{% with signal=row.signal %}{% include "_signal.html" %}{% endwith %}</td>
+      {% for col in extra_columns %}
+      <td class="num x">{{ row[col] | fmt(COLUMNS[col][2]) }}</td>
+      {% endfor %}
+      <td class="x">{% if flag_text %}<span class="flag-count{{ ' hard' if hard }}" title="{{ flag_text }}"><svg class="icon" aria-hidden="true"><use href="#i-alert"/></svg>{{ row.flags | length }}<span class="visually-hidden">: {{ flag_text }}</span></span>{% endif %}</td>
     </tr>
   {% else %}
-    <tr><td colspan="{{ columns | length + 3 }}">Ningún valor cumple los filtros. Si la base de datos está vacía, ejecuta la carga inicial (ver README).</td></tr>
+    <tr><td colspan="{{ key_columns | length + extra_columns | length + 4 }}">Ningún valor cumple los filtros. Si la base de datos está vacía, ejecuta la carga inicial (ver README).</td></tr>
   {% endfor %}
   </tbody>
 </table>

@@ -1,1 +1,1 @@
-{% for flag in flags or [] %}<span class="flag {{ 'hard' if flag in ('payout_alto','payout_fcf_alto','payout_ocf_alto','fcf_negativo','bpa_negativo') }}">{{ FLAG_LABELS.get(flag, flag) }}</span>{% endfor %}
+{% for flag in flags or [] %}<span class="flag {{ 'hard' if flag in HARD_FLAGS }}">{{ FLAG_LABELS.get(flag, flag) }}</span>{% endfor %}

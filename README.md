@@ -6,7 +6,9 @@ universo comprable en HeyTrade).
 1. **Screener (nivel 1):** los valores del universo separados por sector, con las métricas de un
    inversor en dividendos: yield actual, estimada y media a 5 años, PER y PER estimado, payout sobre
    beneficios y sobre FCF, crecimiento del dividendo a 5 y 10 años, años sin recorte, regla Chowder,
-   rentabilidad total estimada, precio justo y precio de compra.
+   rentabilidad total estimada, precio justo y precio de compra. En el móvil cada valor es una
+   tarjeta con bandera, icono de sector, yield, precio, crecimiento a 5 años, precio justo y
+   semáforo; en el ordenador, una tabla con esas columnas primero y el resto a continuación.
 2. **Seguimiento (nivel 2):** los valores que marcas con ☆. Muestra el detalle de valoración, el
    semáforo de compra, el rango de 52 semanas, la distancia a la media de 200 días y gráficos de
    precio, yield histórica y dividendo por año. Cada valor admite su propio margen de seguridad,

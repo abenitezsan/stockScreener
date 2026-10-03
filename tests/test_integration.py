@@ -122,3 +122,11 @@ def test_universe_tags(client):
         assert ddd.universes == [] and ddd.active is False
         s.refresh(aaa)
         assert aaa.universes == ["manual"] and aaa.active
+
+
+def test_country_flag(client):
+    from app.web import country_flag
+
+    assert country_flag("Spain") == ("\U0001f1ea\U0001f1f8", "España")
+    assert country_flag("Narnia") == ("", "Narnia")
+    assert country_flag(None) == ("", "País desconocido")

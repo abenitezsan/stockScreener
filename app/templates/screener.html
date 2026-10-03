@@ -2,32 +2,36 @@
 {% block title %}Screener · Stock Screener{% endblock %}
 {% block content %}
 <h2>Screener de dividendos</h2>
-<form id="filters" class="filters" hx-get="{{ ROOT }}/screener" hx-target="#results" hx-push-url="true"
+<form id="filters" hx-get="{{ ROOT }}/screener" hx-target="#results" hx-push-url="true"
       hx-trigger="change, keyup changed delay:400ms from:input[name=q]">
   <input type="hidden" name="submitted" value="1">
   <input type="hidden" name="sector" value="{{ filters.sector }}">
   <input type="hidden" name="sort" value="{{ filters.sort }}">
   <input type="hidden" name="desc" value="{{ '1' if filters.desc else '0' }}">
   {% macro num(name, value, placeholder) %}<input type="number" step="any" name="{{ name }}" value="{{ '' if value is none else value }}" placeholder="{{ placeholder }}">{% endmacro %}
-  <label>Buscar<input type="search" name="q" value="{{ filters.q }}" placeholder="Ticker o nombre"></label>
-  <label>Yield media 5 años (%)<div class="range">{{ num('yield_avg_min', filters.yield_avg_min, 'mín') }}{{ num('yield_avg_max', filters.yield_avg_max, 'máx') }}</div></label>
-  <label>Yield actual (%)<div class="range">{{ num('yield_min', filters.yield_min, 'mín') }}{{ num('yield_max', filters.yield_max, 'máx') }}</div></label>
-  <label>Payout BPA máx. (%){{ num('payout_max', filters.payout_max, 'p. ej. 70') }}</label>
-  <label>Crec. div. 5a mín. (%){{ num('dgr_min', filters.dgr_min, 'p. ej. 3') }}</label>
-  <label>Años sin recorte mín.{{ num('years_no_cut_min', filters.years_no_cut_min, 'p. ej. 5') }}</label>
-  <label>Capitalización mín. (mil M€){{ num('cap_min_bn', filters.cap_min_bn, 'p. ej. 2') }}</label>
-  <label>Región
-    <select name="region" multiple size="3">
-      {% for code, label in REGIONS.items() %}<option value="{{ code }}" {{ 'selected' if code in filters.regions }}>{{ label }}</option>{% endfor %}
-    </select>
-  </label>
-  <label>Semáforo
-    <select name="signal">
-      <option value="">Todos</option>
-      {% for key, (icon, label) in SIGNAL_LABELS.items() %}<option value="{{ key }}" {{ 'selected' if filters.signal == key }}>{{ icon }} {{ label }}</option>{% endfor %}
-    </select>
-  </label>
-  <label><input type="checkbox" name="quality_only" value="1" {{ 'checked' if filters.quality_only }}> Solo dividendo sostenible</label>
+  <input type="search" name="q" value="{{ filters.q }}" placeholder="Buscar ticker o nombre" aria-label="Buscar ticker o nombre">
+  <details id="filters-box" class="filters-box">
+    <summary><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg> Filtros <span class="badge" id="filters-count" hidden></span></summary>
+    <div class="filters">
+      <label>Yield media 5 años (%)<div class="range">{{ num('yield_avg_min', filters.yield_avg_min, 'mín') }}{{ num('yield_avg_max', filters.yield_avg_max, 'máx') }}</div></label>
+      <label>Yield actual (%)<div class="range">{{ num('yield_min', filters.yield_min, 'mín') }}{{ num('yield_max', filters.yield_max, 'máx') }}</div></label>
+      <label>Payout BPA máx. (%){{ num('payout_max', filters.payout_max, 'p. ej. 70') }}</label>
+      <label>Crec. div. 5a mín. (%){{ num('dgr_min', filters.dgr_min, 'p. ej. 3') }}</label>
+      <label>Años sin recorte mín.{{ num('years_no_cut_min', filters.years_no_cut_min, 'p. ej. 5') }}</label>
+      <label>Capitalización mín. (mil M€){{ num('cap_min_bn', filters.cap_min_bn, 'p. ej. 2') }}</label>
+      <fieldset class="chips">
+        <legend>Región</legend>
+        {% for code, label in REGIONS.items() %}<label><input type="checkbox" name="region" value="{{ code }}" {{ 'checked' if code in filters.regions }}> {{ label }}</label>{% endfor %}
+      </fieldset>
+      <label>Semáforo
+        <select name="signal">
+          <option value="">Todos</option>
+          {% for key, (icon, label) in SIGNAL_LABELS.items() %}<option value="{{ key }}" {{ 'selected' if filters.signal == key }}>{{ icon }} {{ label }}</option>{% endfor %}
+        </select>
+      </label>
+      <label><input type="checkbox" name="quality_only" value="1" {{ 'checked' if filters.quality_only }}> Solo dividendo sostenible</label>
+    </div>
+  </details>
 </form>
 <div id="results">{% include "_screener_results.html" %}</div>
 {% endblock %}
