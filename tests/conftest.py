@@ -11,6 +11,9 @@ def client(tmp_path_factory):
     os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
     os.environ["SCHEDULER_ENABLED"] = "false"
     os.environ["REQUEST_DELAY"] = "0"
+    os.environ["SUPERADMIN_EMAIL"] = (
+        " Admin@Example.com "  # se normaliza (minúsculas, sin espacios)
+    )
     from app.config import get_settings
 
     get_settings.cache_clear()

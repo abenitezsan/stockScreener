@@ -15,7 +15,7 @@ from starlette.datastructures import QueryParams
 from app import auth, screener
 from app.analysis import sectors, valuation
 from app.analysis.dividends import TtmIndex, analyze
-from app.config import get_settings, today
+from app.config import get_settings, today, utcnow
 from app.db import get_session
 from app.models import (
     DividendEvent,
@@ -24,6 +24,7 @@ from app.models import (
     SavedFilter,
     Security,
     User,
+    UserSession,
     WatchlistItem,
 )
 
@@ -72,7 +73,16 @@ def _api_user(user: CurrentUser) -> User:
     return user
 
 
+def _admin_user(request: Request, user: CurrentUser) -> User:
+    if user is None:
+        raise LoginRequired(_here(request), "admin")
+    if not auth.is_superadmin(user):
+        raise HTTPException(404)  # a los demás usuarios no se les revela que existe
+    return user
+
+
 ApiUser = Annotated[User, Depends(_api_user)]
+AdminUser = Annotated[User, Depends(_admin_user)]
 WatchlistUser = page_user("watchlist")
 PortfolioUser = page_user("portfolio")
 WatchUser = page_user("watch")
@@ -81,7 +91,12 @@ router = APIRouter(dependencies=[Depends(current_user)])
 
 
 def _template_context(request: Request) -> dict:
-    return {"user": getattr(request.state, "user", None), "here": quote(_here(request), safe="")}
+    user = getattr(request.state, "user", None)
+    return {
+        "user": user,
+        "is_admin": auth.is_superadmin(user),
+        "here": quote(_here(request), safe=""),
+    }
 
 
 templates = Jinja2Templates(
@@ -544,6 +559,7 @@ REASONS = {
     "watchlist": "Entra para ver tus valores en seguimiento.",
     "watch": "Necesitas estar registrado para añadir empresas a seguimiento.",
     "portfolio": "La cartera es privada: entra para verla.",
+    "admin": "Entra con la cuenta de superadministrador.",
 }
 
 
@@ -652,7 +668,12 @@ def register(
         )
     auth.record_failure(key)  # cuenta cada alta, también las buenas: frena el alta masiva
     error = auth.validate_credentials(email, password)
-    user = None if error else auth.create_user(session, email, password)
+    # El email del superadmin está reservado (se crea con la CLI); se responde igual que a un duplicado
+    user = (
+        None
+        if error or auth.is_reserved_email(email)
+        else auth.create_user(session, email, password)
+    )
     if not error and user is None:
         error = "Ya existe una cuenta con ese email."
     if error:
@@ -666,6 +687,114 @@ def logout(request: Request, session: DbSession):
     response = RedirectResponse(f"{ROOT}/screener", status_code=303)
     response.delete_cookie(auth.COOKIE, path=ROOT or "/")
     return response
+
+
+# --- Gestión de usuarios (solo superadmin) -----------------------------------------
+
+ADMIN_DONE = {
+    "created": "Usuario creado.",
+    "password": "Contraseña cambiada y sesiones de ese usuario cerradas.",
+    "sessions": "Sesiones cerradas.",
+    "deleted": "Usuario borrado, con su seguimiento y sus filtros guardados.",
+}
+
+
+def _admin_users(session: Session) -> list:
+    def count(model, *conditions):
+        return (
+            select(func.count())
+            .where(model.user_id == User.id, *conditions)
+            .correlate(User)
+            .scalar_subquery()
+        )
+
+    return session.execute(
+        select(
+            User,
+            count(WatchlistItem).label("watching"),
+            count(SavedFilter).label("filters"),
+            count(UserSession, UserSession.expires_at > utcnow()).label("sessions"),
+        ).order_by(User.created_at, User.id)
+    ).all()
+
+
+def _admin_page(
+    request: Request, session: Session, error: str = "", done: str = "", email: str = ""
+):
+    ctx = {
+        "rows": _admin_users(session),
+        "error": error,
+        "notice": ADMIN_DONE.get(done, ""),
+        "email": email,
+        "min_password": auth.MIN_PASSWORD,
+    }
+    return templates.TemplateResponse(
+        request, "admin_users.html", ctx, status_code=400 if error else 200
+    )
+
+
+def _admin_redirect(done: str) -> RedirectResponse:
+    return RedirectResponse(f"{ROOT}/admin/users?done={done}", status_code=303)
+
+
+def _admin_target(session: Session, user_id: int) -> User:
+    target = session.get(User, user_id)
+    if target is None:
+        raise HTTPException(404)
+    return target
+
+
+@router.get("/admin/users", response_class=HTMLResponse)
+def admin_users_page(request: Request, session: DbSession, admin: AdminUser, done: str = ""):
+    return _admin_page(request, session, done=done)
+
+
+@router.post("/admin/users", response_class=HTMLResponse)
+def admin_create_user(
+    request: Request,
+    session: DbSession,
+    admin: AdminUser,
+    email: Annotated[str, Form()] = "",
+    password: Annotated[str, Form()] = "",
+):
+    email = auth.normalize_email(email)
+    error = auth.validate_credentials(email, password)
+    if not error and auth.create_user(session, email, password) is None:
+        error = "Ya existe una cuenta con ese email."
+    if error:
+        return _admin_page(request, session, error, email=email)
+    return _admin_redirect("created")
+
+
+@router.post("/admin/users/{user_id}/password", response_class=HTMLResponse)
+def admin_set_password(
+    request: Request,
+    user_id: int,
+    session: DbSession,
+    admin: AdminUser,
+    password: Annotated[str, Form()] = "",
+):
+    target = _admin_target(session, user_id)
+    if error := auth.validate_password(password):
+        return _admin_page(request, session, f"{target.email}: {error}")
+    auth.set_password(session, target, password)
+    return _admin_redirect("password")
+
+
+@router.post("/admin/users/{user_id}/sessions")
+def admin_close_sessions(user_id: int, session: DbSession, admin: AdminUser):
+    auth.delete_sessions(session, _admin_target(session, user_id).id)
+    session.commit()
+    return _admin_redirect("sessions")
+
+
+@router.post("/admin/users/{user_id}/delete", response_class=HTMLResponse)
+def admin_delete_user(request: Request, user_id: int, session: DbSession, admin: AdminUser):
+    target = _admin_target(session, user_id)
+    if auth.is_superadmin(target):
+        return _admin_page(request, session, "No puedes borrar la cuenta del superadministrador.")
+    auth.delete_user(session, target)
+    return _admin_redirect("deleted")
 
 
 # --- Filtros guardados (solo con sesión; el screener sigue siendo público) -----------

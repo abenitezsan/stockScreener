@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # Prefijo público cuando la app va detrás de un proxy en una subruta (p. ej. /stockscreener).
     # El proxy quita el prefijo antes de reenviar; la app solo lo usa para generar enlaces.
     root_path: str = ""
+    # Email del superadministrador (gestiona usuarios en /admin/users). Esa cuenta no se puede
+    # crear desde el registro público: se crea con `python -m app.cli set-password EMAIL`.
+    superadmin_email: str = ""
 
     # Logs: siempre a consola; además a fichero (con rotación) si se define LOG_DIR
     log_dir: str | None = None

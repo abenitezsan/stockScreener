@@ -32,6 +32,28 @@ universo comprable en HeyTrade).
   usuario que se registre.
 - Hay un límite de intentos de entrada y de altas por IP (en memoria; se reinicia con la app).
 
+### Superadministrador
+
+La cuenta de superadmin es la que tiene el email indicado en la variable de entorno
+`SUPERADMIN_EMAIL` (en `.env`). Solo ella ve la entrada **Usuarios** del menú (`/admin/users`),
+donde puede ver los usuarios con su uso (valores en seguimiento, filtros guardados, sesiones
+activas), **crear** cuentas, **cambiar la contraseña** de un usuario (cierra sus sesiones),
+**cerrar sus sesiones** y **borrarlo** (con su seguimiento y filtros). No puede borrar su propia
+cuenta. Para el resto de usuarios esa ruta no existe (404).
+
+Como el registro es libre y no verifica el email, ese email **está reservado**: no se puede
+registrar desde la web (quien lo registrara primero sería superadmin). La cuenta se crea una sola
+vez desde la consola, que pide la contraseña:
+
+```bash
+docker compose exec stockscreener python -m app.cli set-password tu@email.com
+```
+
+El mismo comando sirve para **recuperar el acceso** de cualquier cuenta (cambia su contraseña y
+cierra sus sesiones), por ejemplo si el superadmin olvida la suya. Si cambias `SUPERADMIN_EMAIL`,
+el nuevo email pasa a ser superadmin al reiniciar (el anterior deja de serlo). Al arrancar, el log
+indica si el superadmin configurado ya tiene cuenta.
+
 El cálculo de los precios justos y de compra está documentado en
 [`docs/valoracion.md`](docs/valoracion.md).
 

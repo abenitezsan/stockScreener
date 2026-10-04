@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Usuarios · Stock Screener{% endblock %}
+{% block content %}
+<h2>Usuarios <span class="muted count">{{ rows | length }}</span></h2>
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+
+<details class="admin-new" {{ 'open' if error and email }}>
+  <summary>Crear usuario</summary>
+  <form method="post" action="{{ ROOT }}/admin/users" class="admin-form">
+    <label>Email<input type="email" name="email" value="{{ email }}" autocomplete="off" maxlength="254" required></label>
+    <label>Contraseña<input type="password" name="password" autocomplete="new-password" minlength="{{ min_password }}" maxlength="200" required></label>
+    <button type="submit">Crear</button>
+  </form>
+</details>
+
+<div class="admin-users">
+{% for u, watching, filters, sessions in rows %}
+  <article class="admin-user">
+    <header>
+      <strong>{{ u.email }}</strong>
+      {% if u.id == user.id %}<span class="tag">tú</span>{% endif %}
+      {% if u.email == user.email %}<span class="tag admin">superadmin</span>{% endif %}
+    </header>
+    <p class="muted meta">
+      Alta {{ u.created_at.strftime('%d/%m/%Y') }} ·
+      {{ watching }} en seguimiento · {{ filters }} filtros guardados ·
+      {{ sessions }} {{ 'sesión activa' if sessions == 1 else 'sesiones activas' }}
+    </p>
+    <details>
+      <summary>Acciones</summary>
+      <form method="post" action="{{ ROOT }}/admin/users/{{ u.id }}/password" class="admin-form">
+        <label>Nueva contraseña<input type="password" name="password" autocomplete="new-password" minlength="{{ min_password }}" maxlength="200" required></label>
+        <button type="submit" class="outline">Cambiar contraseña</button>
+      </form>
+      <p class="muted"><small>Cambiar la contraseña cierra también todas sus sesiones.</small></p>
+      <div class="admin-actions">
+        <form method="post" action="{{ ROOT }}/admin/users/{{ u.id }}/sessions">
+          <button type="submit" class="outline secondary" {{ 'disabled' if not sessions }}>Cerrar sesiones</button>
+        </form>
+        {% if u.email != user.email %}
+        <form method="post" action="{{ ROOT }}/admin/users/{{ u.id }}/delete"
+              onsubmit="return confirm('¿Borrar a {{ u.email | e }} con todo su seguimiento y filtros guardados? No se puede deshacer.')">
+          <button type="submit" class="outline danger">Borrar usuario</button>
+        </form>
+        {% endif %}
+      </div>
+    </details>
+  </article>
+{% endfor %}
+</div>
+{% endblock %}

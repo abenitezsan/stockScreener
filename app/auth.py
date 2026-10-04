@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
-from app.config import utcnow
+from app.config import get_settings, utcnow
 from app.models import User, UserSession, WatchlistItem
 
 COOKIE = "stockscreener_session"
@@ -57,15 +57,33 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
-def validate_credentials(email: str, password: str) -> str | None:
-    """Mensaje de error para mostrar al usuario, o None si son válidos."""
-    if len(email) > 254 or not _EMAIL.match(email):
-        return "Introduce un email válido."
+def validate_password(password: str) -> str | None:
     if len(password) < MIN_PASSWORD:
         return f"La contraseña debe tener al menos {MIN_PASSWORD} caracteres."
     if len(password) > MAX_PASSWORD:
         return "La contraseña es demasiado larga."
     return None
+
+
+def validate_credentials(email: str, password: str) -> str | None:
+    """Mensaje de error para mostrar al usuario, o None si son válidos."""
+    if len(email) > 254 or not _EMAIL.match(email):
+        return "Introduce un email válido."
+    return validate_password(password)
+
+
+# --- Superadministrador (su email viene de la variable de entorno SUPERADMIN_EMAIL) ----
+
+
+def is_reserved_email(email: str) -> bool:
+    """El email del superadmin no se puede registrar públicamente: sin verificación de email,
+    quien lo registrara primero se convertiría en superadmin."""
+    configured = normalize_email(get_settings().superadmin_email)
+    return bool(configured) and email == configured
+
+
+def is_superadmin(user: User | None) -> bool:
+    return user is not None and is_reserved_email(user.email)
 
 
 # --- Usuarios ------------------------------------------------------------------------
@@ -86,6 +104,19 @@ def create_user(session: Session, email: str, password: str) -> User | None:
         )
     session.commit()
     return user
+
+
+def set_password(session: Session, user: User, password: str) -> None:
+    """Cambia la contraseña y cierra todas las sesiones de ese usuario."""
+    user.password_hash = hash_password(password)
+    delete_sessions(session, user.id)
+    session.commit()
+
+
+def delete_user(session: Session, user: User) -> None:
+    """Borra la cuenta; sus sesiones, seguimiento y filtros caen en cascada (clave foránea)."""
+    session.delete(user)
+    session.commit()
 
 
 def authenticate(session: Session, email: str, password: str) -> User | None:
@@ -124,6 +155,10 @@ def user_for_token(session: Session, token: str | None) -> User | None:
     if row is None or _aware(row.expires_at) < utcnow():
         return None
     return session.get(User, row.user_id)
+
+
+def delete_sessions(session: Session, user_id: int) -> None:
+    session.execute(delete(UserSession).where(UserSession.user_id == user_id))
 
 
 def end_session(session: Session, token: str | None) -> None:
