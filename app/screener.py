@@ -170,8 +170,22 @@ def sector_counts(session: Session, f: Filters) -> list[tuple[str, int]]:
     return sorted(rows, key=lambda r: (-r[1], r[0]))
 
 
-def watchlist_ids(session: Session) -> set[int]:
-    return set(session.scalars(select(WatchlistItem.security_id)))
+def watchlist_ids(session: Session, user_id: int | None) -> set[int]:
+    if user_id is None:
+        return set()
+    return set(
+        session.scalars(select(WatchlistItem.security_id).where(WatchlistItem.user_id == user_id))
+    )
+
+
+def watch_item(session: Session, user_id: int | None, security_id: int) -> WatchlistItem | None:
+    if user_id is None:
+        return None
+    return session.scalar(
+        select(WatchlistItem).where(
+            WatchlistItem.user_id == user_id, WatchlistItem.security_id == security_id
+        )
+    )
 
 
 # --- Nivel 2 -----------------------------------------------------------------------
@@ -246,8 +260,9 @@ def watch_row(session: Session, item: WatchlistItem) -> WatchRow:
     )
 
 
-def watchlist(session: Session) -> list[WatchRow]:
+def watchlist(session: Session, user_id: int) -> list[WatchRow]:
     """Primero las que están en zona de compra; dentro de cada color, las más cercanas a ella."""
     order = {"green": 0, "yellow": 1, "red": 2, "none": 3}
-    rows = [watch_row(session, item) for item in session.scalars(select(WatchlistItem))]
+    items = session.scalars(select(WatchlistItem).where(WatchlistItem.user_id == user_id))
+    rows = [watch_row(session, item) for item in items]
     return sorted(rows, key=lambda r: (order[r.signal], -(r.ratio(r.buy_price) or 0)))

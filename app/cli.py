@@ -1,6 +1,7 @@
 """Línea de comandos: python -m app.cli --help"""
 
 import argparse
+import getpass
 import logging
 import sqlite3
 import sys
@@ -8,7 +9,7 @@ import time
 
 from sqlalchemy import func, select
 
-from app import jobs, universe
+from app import auth, jobs, universe
 from app.db import SessionLocal, engine
 from app.logging_setup import setup_logging
 from app.models import (
@@ -17,6 +18,7 @@ from app.models import (
     PriceHistory,
     Quote,
     Security,
+    User,
     Valuation,
 )
 
@@ -74,6 +76,12 @@ def main() -> None:
     )
     sub.add_parser("status", help="Resumen de lo que hay en la base de datos")
 
+    p = sub.add_parser(
+        "set-password",
+        help="Crea una cuenta o cambia su contraseña (crea el superadmin; recupera el acceso)",
+    )
+    p.add_argument("email")
+
     p = sub.add_parser("backup", help="Copia consistente de la base de datos (aunque esté en uso)")
     p.add_argument("path", help="Fichero de destino, p. ej. /data/backup-2026-09-27.db")
 
@@ -90,6 +98,11 @@ def main() -> None:
             full_load(session)
         elif args.command == "status":
             print_status(session)
+        elif args.command == "set-password":
+            try:
+                print(set_user_password(session, args.email, _ask_password()))
+            except ValueError as error:
+                sys.exit(str(error))
         elif args.command == "universe":
             for name, result in universe.sync_sources(session, args.source, args.file).items():
                 print(f"{name}: {result}")
@@ -136,6 +149,26 @@ def main() -> None:
                 task = TASKS[name]
                 kwargs = {"symbols": args.symbols} if args.symbols and name != "fx" else {}
                 print(f"{name}: {task(session, **kwargs)}")
+
+
+def _ask_password() -> str:
+    password = getpass.getpass("Contraseña: ")
+    if getpass.getpass("Repite la contraseña: ") != password:
+        sys.exit("Las contraseñas no coinciden.")
+    return password
+
+
+def set_user_password(session, email: str, password: str) -> str:
+    """Crea la cuenta si no existe; si existe, cambia su contraseña y cierra sus sesiones."""
+    email = auth.normalize_email(email)
+    if error := auth.validate_credentials(email, password):
+        raise ValueError(error)
+    user = session.scalar(select(User).where(User.email == email))
+    if user is None:
+        auth.create_user(session, email, password)
+        return f"Cuenta creada: {email}"
+    auth.set_password(session, user, password)
+    return f"Contraseña cambiada y sesiones cerradas: {email}"
 
 
 def full_load(session) -> None:

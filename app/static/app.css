@@ -120,6 +120,8 @@ table.wrap td { white-space: normal; }
   body > header.container nav strong { white-space: nowrap; }
   body > header.container nav { --pico-nav-element-spacing-horizontal: 0.35rem; --pico-nav-element-spacing-vertical: 0.5rem; }
   main.container > h2 { font-size: 1.3rem; margin-bottom: 0.75rem; }
+  main.container > hgroup h2 { font-size: 1.25rem; }
+  main.container > hgroup p { font-size: 0.85rem; }
   .overflow-auto { overflow: visible; }
   .screener, .screener tbody { display: block; }
   .screener thead, .screener .x { display: none; }
@@ -177,4 +179,85 @@ button.star { background: none; border: none; padding: 0 0.2rem; margin: 0; font
   /* Pantallas de portátil: nombre más corto para que quepan todas las columnas */
   .screener td.c-name { max-width: 8rem; }
   .screener td.c-sector .sector-name { display: none; }
+}
+
+/* Ficha del valor: aviso de dividendo en riesgo */
+.warn-title { color: var(--status-critical); }
+.alert-hard { border-left: 4px solid var(--status-critical); background: rgba(208, 59, 59, 0.08); padding: 0.8rem 1rem; font-size: 0.9rem; }
+.alert-hard header { display: flex; align-items: center; gap: 0.4rem; margin: -0.8rem -1rem 0.5rem; padding: 0.5rem 1rem;
+                     background: none; border: 0; font-weight: 700; color: var(--status-critical); }
+.alert-hard p { margin-bottom: 0.4rem; }
+.alert-hard ul { margin: 0; padding-left: 1.2rem; }
+.alert-hard li { margin-bottom: 0.3rem; }
+
+/* --- Cuenta ---------------------------------------------------------------------------- */
+nav form.logout { margin: 0; }
+nav button.link { background: none; border: 0; padding: var(--pico-nav-link-spacing-vertical) var(--pico-nav-link-spacing-horizontal);
+                  margin: 0; width: auto; color: var(--pico-primary); cursor: pointer; font: inherit; }
+nav button.link:hover { text-decoration: underline; }
+nav .who { display: none; color: var(--ink-muted); }
+.auth { max-width: 26rem; margin: 1.5rem auto; }
+.auth h2 { margin-bottom: 1rem; }
+.notice { padding: 0.6rem 0.8rem; border-left: 4px solid var(--series-1); background: var(--hi-bg); font-size: 0.9rem; }
+.error { padding: 0.6rem 0.8rem; border-left: 4px solid var(--status-critical); background: rgba(208, 59, 59, 0.1); font-size: 0.9rem; }
+.auth input { margin-bottom: 0.4rem; }
+.auth label small { display: block; margin-bottom: 0.8rem; }
+
+.toast { position: fixed; z-index: 10; left: 1rem; right: 1rem; bottom: 1rem; max-width: 34rem; margin-inline: auto;
+         padding: 0.8rem 2.6rem 0.8rem 1rem; border-radius: 0.5rem; font-size: 0.9rem; line-height: 1.4;
+         background: var(--pico-card-background-color); color: var(--pico-color);
+         border-left: 4px solid var(--status-warning); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25); }
+.toast[hidden] { display: none; }
+.toast a { font-weight: 600; white-space: nowrap; }
+.toast-close { position: absolute; top: 0; right: 0; width: 2.75rem; height: 2.75rem; margin: 0; padding: 0; background: none;
+               border: 0; color: inherit; font-size: 1.4rem; cursor: pointer; }
+
+/* Búsqueda + filtros guardados */
+.searchbar { display: flex; gap: 0.5rem; align-items: flex-start; flex-wrap: wrap; }
+.searchbar > input[type=search] { flex: 1 1 14rem; }
+.saved-pick { display: flex; gap: 0.3rem; flex: 0 1 14rem; }
+.saved-pick select { margin: 0; font-size: 0.9rem; height: 100%; }
+.saved-pick button { margin: 0; width: 2.75rem; padding: 0; flex-shrink: 0; }
+.save-row { display: flex; gap: 0.4rem; align-items: flex-start; flex-wrap: wrap; grid-column: 1 / -1; margin-top: 0.3rem; }
+.save-row input { flex: 1 1 12rem; max-width: 18rem; margin: 0 !important; }
+.save-row button { margin: 0; width: auto; font-size: 0.8rem; padding: 0.3rem 0.8rem; white-space: nowrap; }
+
+@media (max-width: 575.98px) {
+  /* Con Entrar/Salir no cabe el nombre de la app junto a los enlaces */
+  body > header.container nav > ul:first-child { display: none; }
+  body > header.container nav > ul:last-child { width: 100%; justify-content: space-between; }
+  .saved-pick { flex: 1 1 100%; }
+  .saved-pick select { height: 2.75rem; }
+  .save-row input { max-width: none; }
+}
+@media (min-width: 768px) {
+  .searchbar > input[type=search] { max-width: 28rem; }
+  .saved-pick select { padding-block: 0.35rem; height: auto; font-size: 0.85rem; }
+  .saved-pick button { width: 2rem; height: 2rem; }
+  nav .who { display: inline; }
+  .toast { left: auto; right: 1.5rem; margin: 0; }
+}
+
+/* --- Gestión de usuarios (superadmin) -------------------------------------------------- */
+.admin-users { display: grid; grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr)); gap: 0.8rem; }
+.admin-user { margin: 0; padding: 0.8rem 1rem; }
+.admin-user header { margin: 0 0 0.2rem; padding: 0; border: 0; background: none; display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; word-break: break-all; }
+.admin-user details { margin: 0; }
+.admin-user .meta { margin: 0 0 0.5rem; font-size: 0.8rem; }
+.admin-user summary { font-size: 0.9rem; min-height: 2.5rem; }
+.tag { font-size: 0.7rem; padding: 0.05rem 0.45rem; border-radius: 1em; background: var(--hi-bg); font-weight: 600; }
+.tag.admin { background: var(--pico-primary-background); color: var(--pico-primary-inverse); }
+.admin-form { display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap; margin: 0.3rem 0; }
+.admin-form label { flex: 1 1 12rem; margin: 0; font-size: 0.85rem; }
+.admin-form input { margin: 0.2rem 0 0; }
+.admin-form button, .admin-actions button { margin: 0; width: auto; padding: 0.55rem 1rem; font-size: 0.85rem; }
+.admin-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.admin-actions form { margin: 0; }
+.admin-new { margin-bottom: 1rem; }
+button.danger { color: var(--status-critical); border-color: var(--status-critical); }
+h2 .count { font-size: 1rem; font-weight: 400; }
+@media (min-width: 768px) {
+  .admin-form button, .admin-actions button { padding: 0.35rem 0.9rem; font-size: 0.8rem; }
+  .admin-form input { padding-block: 0.3rem; height: auto; font-size: 0.85rem; }
+  .admin-user summary { min-height: 0; }
 }

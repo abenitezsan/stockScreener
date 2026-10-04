@@ -40,8 +40,32 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    username: Mapped[str] = mapped_column(String(64), unique=True)
+    email: Mapped[str] = mapped_column(String(254), unique=True)  # siempre en minúsculas
     password_hash: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserSession(Base):
+    """Sesión iniciada. La cookie lleva un token aleatorio; aquí solo se guarda su hash."""
+
+    __tablename__ = "user_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class SavedFilter(Base):
+    """Filtros del screener que un usuario guarda con nombre (parámetros ya normalizados)."""
+
+    __tablename__ = "saved_filters"
+    __table_args__ = (UniqueConstraint("user_id", "name"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(40))
+    params: Mapped[list] = mapped_column(JSON)  # [[clave, valor], ...] (región puede repetirse)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -228,11 +252,15 @@ class FxRate(Base):
 
 
 class WatchlistItem(Base):
-    __tablename__ = "watchlist"
+    """Valor en seguimiento de un usuario. `user_id` es NULL solo en las filas anteriores a las
+    cuentas: las adopta el primer usuario que se registra."""
 
-    security_id: Mapped[int] = mapped_column(
-        ForeignKey("securities.id", ondelete="CASCADE"), primary_key=True
-    )
+    __tablename__ = "watchlist"
+    __table_args__ = (UniqueConstraint("user_id", "security_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    security_id: Mapped[int] = mapped_column(ForeignKey("securities.id", ondelete="CASCADE"))
     notes: Mapped[str | None] = mapped_column(Text)
     # Sustituyen a los valores globales de configuración para este valor
     margin_of_safety: Mapped[float | None] = mapped_column(Double)

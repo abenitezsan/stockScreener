@@ -13,7 +13,46 @@ universo comprable en HeyTrade).
    semáforo de compra, el rango de 52 semanas, la distancia a la media de 200 días y gráficos de
    precio, yield histórica y dividendo por año. Cada valor admite su propio margen de seguridad,
    rentabilidad objetivo y notas.
-3. **Cartera:** pendiente.
+3. **Cartera:** pendiente (será privada).
+
+## Cuentas de usuario
+
+- El **screener y la ficha de cada valor son públicos**. El **seguimiento** y la **cartera** son
+  privados: sin sesión redirigen a la pantalla de entrada. Al pulsar ☆ sin sesión sale un aviso
+  para registrarse.
+- Alta con **solo email y contraseña** (mínimo 8 caracteres), sin verificación del email y sin
+  recuperación de contraseña: si se pierde, hay que crear otra cuenta. Al registrarse se queda con
+  la sesión iniciada. Las contraseñas se guardan con scrypt y la sesión dura 30 días (cookie
+  `HttpOnly`; el token se guarda en la base de datos solo como hash, así que «Salir» la invalida).
+- Cada usuario tiene su propio seguimiento (con su margen de seguridad, rentabilidad objetivo y
+  notas) y sus **filtros guardados**: con sesión, el botón «Guardar filtros» (dentro de «Filtros»)
+  guarda los filtros actuales con un nombre y el selector «Mis filtros» los aplica. Guardar con un
+  nombre existente lo actualiza. No se guarda el texto de búsqueda.
+- Si la base de datos ya tenía valores en seguimiento de antes de las cuentas, los adopta el primer
+  usuario que se registre.
+- Hay un límite de intentos de entrada y de altas por IP (en memoria; se reinicia con la app).
+
+### Superadministrador
+
+La cuenta de superadmin es la que tiene el email indicado en la variable de entorno
+`SUPERADMIN_EMAIL` (en `.env`). Solo ella ve la entrada **Usuarios** del menú (`/admin/users`),
+donde puede ver los usuarios con su uso (valores en seguimiento, filtros guardados, sesiones
+activas), **crear** cuentas, **cambiar la contraseña** de un usuario (cierra sus sesiones),
+**cerrar sus sesiones** y **borrarlo** (con su seguimiento y filtros). No puede borrar su propia
+cuenta. Para el resto de usuarios esa ruta no existe (404).
+
+Como el registro es libre y no verifica el email, ese email **está reservado**: no se puede
+registrar desde la web (quien lo registrara primero sería superadmin). La cuenta se crea una sola
+vez desde la consola, que pide la contraseña:
+
+```bash
+docker compose exec stockscreener python -m app.cli set-password tu@email.com
+```
+
+El mismo comando sirve para **recuperar el acceso** de cualquier cuenta (cambia su contraseña y
+cierra sus sesiones), por ejemplo si el superadmin olvida la suya. Si cambias `SUPERADMIN_EMAIL`,
+el nuevo email pasa a ser superadmin al reiniciar (el anterior deja de serlo). Al arrancar, el log
+indica si el superadmin configurado ya tiene cuenta.
 
 El cálculo de los precios justos y de compra está documentado en
 [`docs/valoracion.md`](docs/valoracion.md).

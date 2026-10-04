@@ -1,42 +1,5 @@
 """Flujo completo contra SQLite: universo -> tareas -> screener -> páginas."""
 
-import os
-
-import pytest
-
-
-@pytest.fixture(scope="module")
-def client(tmp_path_factory):
-    db_path = tmp_path_factory.mktemp("db") / "test.db"
-    os.environ["DATABASE_URL"] = f"sqlite:///{db_path}"
-    os.environ["SCHEDULER_ENABLED"] = "false"
-    os.environ["REQUEST_DELAY"] = "0"
-    from app.config import get_settings
-
-    get_settings.cache_clear()
-    from fastapi.testclient import TestClient
-
-    from app import jobs, universe
-    from app.db import SessionLocal, engine
-    from app.main import app
-    from app.models import Base
-    from tests.fake_provider import SPECS, FakeProvider
-
-    assert str(db_path) in str(engine.url)
-    Base.metadata.create_all(engine)
-
-    provider = FakeProvider()
-    with SessionLocal() as session:
-        universe.upsert_universe(session, "TEST", [*SPECS, "ZZZ.XX"])
-        jobs.refresh_fx(session, provider)
-        jobs.refresh_profiles(session, provider)
-        jobs.refresh_history(session, provider)
-        jobs.refresh_quotes(session, provider)
-        jobs.refresh_financials(session, provider)
-        jobs.recompute_valuations(session)
-    with TestClient(app) as c:
-        yield c
-
 
 def test_pipeline_populates_valuations(client):
     from sqlalchemy import select
@@ -81,12 +44,21 @@ def test_screener_defaults_and_filters(client):
     assert "BBB.MC" in partial.text and "CCC.L" not in partial.text
 
 
-def test_watchlist_and_detail(client):
+def test_watchlist_and_detail(anon):
     from sqlalchemy import select
 
     from app.db import SessionLocal
     from app.models import Security
 
+    client = anon
+    assert (
+        client.post(
+            "/register",
+            data={"email": "seguidor@example.com", "password": "clave-larga-1"},
+            follow_redirects=False,
+        ).status_code
+        == 303
+    )
     with SessionLocal() as s:
         sec_id = s.scalar(select(Security.id).where(Security.symbol == "AAA"))
     assert "★" in client.post(f"/watchlist/{sec_id}/toggle").text
@@ -103,7 +75,7 @@ def test_watchlist_and_detail(client):
     assert detail.status_code == 200
     assert "Esperar" in detail.text and 'value="20.0"' in detail.text
     assert client.get("/security/NOPE").status_code == 404
-    assert client.get("/portfolio").status_code == 200
+    assert client.get("/portfolio").status_code == 200  # con sesión, la cartera es accesible
 
 
 def test_universe_tags(client):
@@ -132,3 +104,26 @@ def test_country_flag(client):
     assert country_flag("Spain") == ("\U0001f1ea\U0001f1f8", "España")
     assert country_flag("Narnia") == ("", "Narnia")
     assert country_flag(None) == ("", "País desconocido")
+
+
+def test_detail_explains_hard_flags(client):
+    from sqlalchemy import select
+
+    from app.db import SessionLocal
+    from app.models import Security, Valuation
+
+    assert "Riesgo para el dividendo" not in client.get("/security/AAA").text
+    with SessionLocal() as s:
+        sec = s.scalar(select(Security).where(Security.symbol == "AAA"))
+        v = s.get(Valuation, sec.id)
+        original = v.flags
+        v.flags = [*original, "payout_alto", "fcf_negativo"]
+        s.commit()
+        try:
+            page = client.get("/security/AAA").text
+            assert "Riesgo para el dividendo" in page
+            assert "Payout sobre beneficios alto." in page and "FCF negativo." in page
+            assert "por encima del 70,0 %" in page  # límite del grupo general
+        finally:
+            v.flags = original
+            s.commit()
