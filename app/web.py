@@ -2,24 +2,91 @@
 
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from jinja2 import Undefined
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from starlette.datastructures import QueryParams
 
-from app import screener
+from app import auth, screener
 from app.analysis import sectors, valuation
 from app.analysis.dividends import TtmIndex, analyze
 from app.config import get_settings, today
 from app.db import get_session
-from app.models import DividendEvent, FinancialsAnnual, PriceHistory, Security, WatchlistItem
+from app.models import (
+    DividendEvent,
+    FinancialsAnnual,
+    PriceHistory,
+    SavedFilter,
+    Security,
+    User,
+    WatchlistItem,
+)
 
 DbSession = Annotated[Session, Depends(get_session)]
-router = APIRouter()
-templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+
+
+# --- Usuario actual ------------------------------------------------------------------
+
+
+class LoginRequired(Exception):
+    """La página es privada: se redirige al login y luego se vuelve a `next`."""
+
+    def __init__(self, next_url: str, reason: str):
+        self.next_url, self.reason = next_url, reason
+
+
+def current_user(request: Request, session: DbSession) -> User | None:
+    user = auth.user_for_token(session, request.cookies.get(auth.COOKIE))
+    request.state.user = user  # lo leen las plantillas (nav, botón de seguir…)
+    return user
+
+
+CurrentUser = Annotated[User | None, Depends(current_user)]
+
+
+def _here(request: Request) -> str:
+    """Ruta actual sin el prefijo público (el proxy ya lo quita) y con la query."""
+    query = request.url.query
+    return request.url.path + (f"?{query}" if query else "")
+
+
+def page_user(reason: str):
+    """Usuario para una página privada: sin sesión, redirige al login con un aviso."""
+
+    def dependency(request: Request, user: CurrentUser) -> User:
+        if user is None:
+            raise LoginRequired(_here(request), reason)
+        return user
+
+    return Annotated[User, Depends(dependency)]
+
+
+def _api_user(user: CurrentUser) -> User:
+    if user is None:
+        raise HTTPException(401, "Necesitas iniciar sesión")
+    return user
+
+
+ApiUser = Annotated[User, Depends(_api_user)]
+WatchlistUser = page_user("watchlist")
+PortfolioUser = page_user("portfolio")
+WatchUser = page_user("watch")
+
+router = APIRouter(dependencies=[Depends(current_user)])
+
+
+def _template_context(request: Request) -> dict:
+    return {"user": getattr(request.state, "user", None), "here": quote(_here(request), safe="")}
+
+
+templates = Jinja2Templates(
+    directory=Path(__file__).parent / "templates", context_processors=[_template_context]
+)
 
 FLAG_LABELS = {
     "payout_alto": "Payout sobre beneficios alto",
@@ -183,8 +250,7 @@ def _float(value: str | None) -> float | None:
         return None
 
 
-def parse_filters(request: Request) -> screener.Filters:
-    p = request.query_params
+def filters_from_params(p: QueryParams) -> screener.Filters:
     f = screener.Filters()
     if "submitted" not in p:  # primera carga: valores por defecto
         f.sector = p.get("sector", "")
@@ -209,9 +275,67 @@ def parse_filters(request: Request) -> screener.Filters:
     return f
 
 
-def _screener_context(session: Session, f: screener.Filters) -> dict:
+def parse_filters(request: Request) -> screener.Filters:
+    return filters_from_params(request.query_params)
+
+
+def _num(value: float) -> str:
+    return f"{value:g}"
+
+
+def filters_to_params(f: screener.Filters) -> list[list[str]]:
+    """Parámetros de URL equivalentes a unos filtros (sin la búsqueda de texto), en el mismo
+    formato que lee `filters_from_params`. Lo que no aparece queda en blanco al aplicarlos."""
+    params = [["sector", f.sector]] if f.sector else []
+    params += [["region", r] for r in f.regions]
+    for name in (
+        "yield_avg_min",
+        "yield_avg_max",
+        "yield_min",
+        "yield_max",
+        "payout_max",
+        "dgr_min",
+        "years_no_cut_min",
+        "cap_min_bn",
+    ):
+        if (value := getattr(f, name)) is not None:
+            params.append([name, _num(value)])
+    if f.signal:
+        params.append(["signal", f.signal])
+    if f.dividend_only:
+        params.append(["dividend_only", "1"])
+    if f.quality_only:
+        params.append(["quality_only", "1"])
+    params += [["sort", f.sort], ["desc", "1" if f.desc else "0"]]
+    return params
+
+
+def saved_filter_url(saved: SavedFilter) -> str:
+    query = urlencode([("submitted", "1"), *saved.params, ("f", saved.id)])
+    return f"{ROOT}/screener?{query}"
+
+
+MAX_SAVED_FILTERS = 30
+
+
+def _screener_context(
+    session: Session, f: screener.Filters, user: User | None, active_filter: int | None
+) -> dict:
+    saved = (
+        list(
+            session.scalars(
+                select(SavedFilter)
+                .where(SavedFilter.user_id == user.id)
+                .order_by(func.lower(SavedFilter.name))
+            )
+        )
+        if user
+        else []
+    )
     return {
         "filters": f,
+        "saved_filters": [(sf, saved_filter_url(sf)) for sf in saved],
+        "active_filter": active_filter,
         "rows": screener.screen(session, f),
         "sectors": screener.sector_counts(session, f),
         "key_columns": screener.SCREENER_KEY_COLUMNS,
@@ -221,7 +345,7 @@ def _screener_context(session: Session, f: screener.Filters) -> dict:
             if c not in screener.SCREENER_KEY_COLUMNS
             and c not in ("symbol", "name", "sector", "country")
         ],
-        "watched": screener.watchlist_ids(session),
+        "watched": screener.watchlist_ids(session, user.id if user else None),
     }
 
 
@@ -234,8 +358,11 @@ def index():
 
 
 @router.get("/screener", response_class=HTMLResponse)
-def screener_page(request: Request, session: DbSession):
-    ctx = _screener_context(session, parse_filters(request))
+def screener_page(request: Request, session: DbSession, user: CurrentUser):
+    active = request.query_params.get("f", "")
+    ctx = _screener_context(
+        session, parse_filters(request), user, int(active) if active.isdecimal() else None
+    )
     # Con HTMX (cambio de filtros) solo se devuelve la tabla
     partial = request.headers.get("HX-Request") and not request.headers.get(
         "HX-History-Restore-Request"
@@ -245,14 +372,14 @@ def screener_page(request: Request, session: DbSession):
 
 
 @router.post("/watchlist/{security_id}/toggle", response_class=HTMLResponse)
-def toggle_watch(request: Request, security_id: int, session: DbSession):
+def toggle_watch(request: Request, security_id: int, session: DbSession, user: ApiUser):
     if session.get(Security, security_id) is None:
         raise HTTPException(404)
-    item = session.get(WatchlistItem, security_id)
+    item = screener.watch_item(session, user.id, security_id)
     if item:
         session.delete(item)
     else:
-        session.add(WatchlistItem(security_id=security_id))
+        session.add(WatchlistItem(user_id=user.id, security_id=security_id))
     session.commit()
     return templates.TemplateResponse(
         request, "_watch_button.html", {"id": security_id, "watched": item is None}
@@ -260,19 +387,19 @@ def toggle_watch(request: Request, security_id: int, session: DbSession):
 
 
 @router.get("/watchlist", response_class=HTMLResponse)
-def watchlist_page(request: Request, session: DbSession):
+def watchlist_page(request: Request, session: DbSession, user: WatchlistUser):
     return templates.TemplateResponse(
-        request, "watchlist.html", {"rows": screener.watchlist(session)}
+        request, "watchlist.html", {"rows": screener.watchlist(session, user.id)}
     )
 
 
 @router.get("/security/{symbol}", response_class=HTMLResponse)
-def security_page(request: Request, symbol: str, session: DbSession):
+def security_page(request: Request, symbol: str, session: DbSession, user: CurrentUser):
     sec = session.scalar(select(Security).where(Security.symbol == symbol.upper()))
     if sec is None:
         raise HTTPException(404, "Valor no encontrado")
-    item = session.get(WatchlistItem, sec.id) or WatchlistItem(security_id=sec.id)
-    row = screener.watch_row(session, item)
+    saved_item = screener.watch_item(session, user.id if user else None, sec.id)
+    row = screener.watch_row(session, saved_item or WatchlistItem(security_id=sec.id))
     closes = session.execute(
         select(PriceHistory.day, PriceHistory.close)
         .where(PriceHistory.security_id == sec.id)
@@ -289,7 +416,7 @@ def security_page(request: Request, symbol: str, session: DbSession):
         {
             "row": row,
             "sec": sec,
-            "watched": session.get(WatchlistItem, sec.id) is not None,
+            "watched": saved_item is not None,
             "settings": get_settings(),
             "chart_data": _chart_data(row, closes, dividends),
             "hard_reasons": hard_flag_reasons(session, sec, row),
@@ -386,6 +513,7 @@ def _chart_data(row: screener.WatchRow, closes, dividends) -> dict:
 def update_watch(
     symbol: str,
     session: DbSession,
+    user: WatchUser,
     notes: Annotated[str, Form()] = "",
     margin_of_safety: Annotated[str, Form()] = "",
     target_total_return: Annotated[str, Form()] = "",
@@ -393,7 +521,9 @@ def update_watch(
     sec = session.scalar(select(Security).where(Security.symbol == symbol.upper()))
     if sec is None:
         raise HTTPException(404)
-    item = session.get(WatchlistItem, sec.id) or WatchlistItem(security_id=sec.id)
+    item = screener.watch_item(session, user.id, sec.id) or WatchlistItem(
+        user_id=user.id, security_id=sec.id
+    )
     item.notes = notes.strip() or None
     mos, target = _float(margin_of_safety), _float(target_total_return)
     item.margin_of_safety = mos / 100 if mos is not None else None
@@ -404,5 +534,182 @@ def update_watch(
 
 
 @router.get("/portfolio", response_class=HTMLResponse)
-def portfolio_page(request: Request):
+def portfolio_page(request: Request, user: PortfolioUser):
     return templates.TemplateResponse(request, "portfolio.html")
+
+
+# --- Cuenta: entrar, crear cuenta y salir -------------------------------------------
+
+REASONS = {
+    "watchlist": "Entra para ver tus valores en seguimiento.",
+    "watch": "Necesitas estar registrado para añadir empresas a seguimiento.",
+    "portfolio": "La cartera es privada: entra para verla.",
+}
+
+
+def _safe_next(value: str | None) -> str:
+    """Solo rutas internas (nada de `//host` ni esquemas) y nunca las propias de la cuenta."""
+    if (
+        value
+        and value.startswith("/")
+        and not value.startswith(("//", "/login", "/register", "/logout"))
+        and "\\" not in value
+        and all(ord(c) >= 32 for c in value)
+    ):
+        return value
+    return "/screener"
+
+
+def _auth_page(
+    request: Request, mode: str, next_url: str, email: str = "", error: str = "", reason: str = ""
+):
+    ctx = {
+        "mode": mode,
+        "next": next_url,
+        "email": email,
+        "error": error,
+        "notice": REASONS.get(reason, ""),
+        "min_password": auth.MIN_PASSWORD,
+    }
+    return templates.TemplateResponse(request, "auth.html", ctx, status_code=400 if error else 200)
+
+
+def _login_redirect(request: Request, session: Session, user: User, next_url: str):
+    response = RedirectResponse(f"{ROOT}{_safe_next(next_url)}", status_code=303)
+    response.set_cookie(
+        auth.COOKIE,
+        auth.start_session(session, user),
+        max_age=auth.SESSION_DAYS * 86400,
+        httponly=True,
+        samesite="lax",
+        secure=request.url.scheme == "https",
+        path=ROOT or "/",
+    )
+    return response
+
+
+def _client_key(request: Request, prefix: str, email: str = "") -> str:
+    return f"{prefix}|{request.client.host if request.client else '-'}|{email}"
+
+
+@router.get("/login", response_class=HTMLResponse)
+def login_page(request: Request, user: CurrentUser, next: str = "", reason: str = ""):
+    if user:
+        return RedirectResponse(f"{ROOT}{_safe_next(next)}", status_code=303)
+    return _auth_page(request, "login", _safe_next(next), reason=reason)
+
+
+@router.post("/login", response_class=HTMLResponse)
+def login(
+    request: Request,
+    session: DbSession,
+    email: Annotated[str, Form()] = "",
+    password: Annotated[str, Form()] = "",
+    next: Annotated[str, Form()] = "",
+):
+    email = auth.normalize_email(email)
+    key = _client_key(request, "login", email)
+    if auth.throttled(key):
+        return _auth_page(
+            request, "login", _safe_next(next), email, "Demasiados intentos. Espera unos minutos."
+        )
+    user = (
+        auth.authenticate(session, email, password) if len(password) <= auth.MAX_PASSWORD else None
+    )
+    if user is None:
+        auth.record_failure(key)
+        return _auth_page(
+            request, "login", _safe_next(next), email, "Email o contraseña incorrectos."
+        )
+    auth.clear_failures(key)
+    return _login_redirect(request, session, user, next)
+
+
+@router.get("/register", response_class=HTMLResponse)
+def register_page(request: Request, user: CurrentUser, next: str = ""):
+    if user:
+        return RedirectResponse(f"{ROOT}{_safe_next(next)}", status_code=303)
+    return _auth_page(request, "register", _safe_next(next))
+
+
+@router.post("/register", response_class=HTMLResponse)
+def register(
+    request: Request,
+    session: DbSession,
+    email: Annotated[str, Form()] = "",
+    password: Annotated[str, Form()] = "",
+    next: Annotated[str, Form()] = "",
+):
+    email = auth.normalize_email(email)
+    key = _client_key(request, "register")
+    if auth.throttled(key):
+        return _auth_page(
+            request,
+            "register",
+            _safe_next(next),
+            email,
+            "Demasiados intentos. Espera unos minutos.",
+        )
+    auth.record_failure(key)  # cuenta cada alta, también las buenas: frena el alta masiva
+    error = auth.validate_credentials(email, password)
+    user = None if error else auth.create_user(session, email, password)
+    if not error and user is None:
+        error = "Ya existe una cuenta con ese email."
+    if error:
+        return _auth_page(request, "register", _safe_next(next), email, error)
+    return _login_redirect(request, session, user, next)  # queda con la sesión iniciada
+
+
+@router.post("/logout")
+def logout(request: Request, session: DbSession):
+    auth.end_session(session, request.cookies.get(auth.COOKIE))
+    response = RedirectResponse(f"{ROOT}/screener", status_code=303)
+    response.delete_cookie(auth.COOKIE, path=ROOT or "/")
+    return response
+
+
+# --- Filtros guardados (solo con sesión; el screener sigue siendo público) -----------
+
+
+def _filter_error(message: str, status: int = 400) -> JSONResponse:
+    return JSONResponse({"error": message}, status_code=status)
+
+
+@router.post("/screener/filters")
+async def save_filter(request: Request, session: DbSession, user: ApiUser):
+    form = await request.form()
+    name = " ".join(str(form.get("name", "")).split())
+    if not name:
+        return _filter_error("Escribe un nombre para el filtro.")
+    if len(name) > 40:
+        return _filter_error("El nombre admite hasta 40 caracteres.")
+    pairs = [
+        (k, v)
+        for k, v in form.multi_items()
+        if isinstance(v, str) and k not in ("name", "q", "submitted", "f") and len(v) <= 100
+    ]
+    params = filters_to_params(filters_from_params(QueryParams([("submitted", "1"), *pairs])))
+    existing = session.scalar(
+        select(SavedFilter).where(
+            SavedFilter.user_id == user.id, func.lower(SavedFilter.name) == name.lower()
+        )
+    )
+    if existing is None:
+        count = session.scalar(select(func.count()).where(SavedFilter.user_id == user.id))
+        if count >= MAX_SAVED_FILTERS:
+            return _filter_error(f"Máximo {MAX_SAVED_FILTERS} filtros guardados: borra alguno.")
+        existing = SavedFilter(user_id=user.id, name=name)
+        session.add(existing)
+    existing.name, existing.params = name, params  # al repetir nombre se actualiza
+    session.commit()
+    return {"url": saved_filter_url(existing)}
+
+
+@router.post("/screener/filters/{filter_id}/delete")
+def delete_filter(filter_id: int, session: DbSession, user: ApiUser):
+    saved = session.get(SavedFilter, filter_id)
+    if saved is None or saved.user_id != user.id:
+        raise HTTPException(404)
+    session.delete(saved)
+    session.commit()
+    return {"url": f"{ROOT}/screener"}

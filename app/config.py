@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
@@ -45,3 +45,7 @@ def get_settings() -> Settings:
 
 def today() -> date:
     return datetime.now(ZoneInfo(get_settings().timezone)).date()
+
+
+def utcnow() -> datetime:
+    return datetime.now(UTC)

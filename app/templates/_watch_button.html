@@ -1,3 +1,9 @@
+{% if user %}
 <button class="star" hx-post="{{ ROOT }}/watchlist/{{ id }}/toggle" hx-swap="outerHTML"
         title="{{ 'Quitar de seguimiento' if watched else 'Añadir a seguimiento' }}"
         aria-label="{{ 'Quitar de seguimiento' if watched else 'Añadir a seguimiento' }}">{{ '★' if watched else '☆' }}</button>
+{% else %}
+<button class="star" type="button" onclick="needLogin()"
+        title="Añadir a seguimiento (necesitas estar registrado)"
+        aria-label="Añadir a seguimiento (necesitas estar registrado)">☆</button>
+{% endif %}

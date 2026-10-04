@@ -3,13 +3,24 @@
 {% block content %}
 <h2>Screener de dividendos</h2>
 <form id="filters" hx-get="{{ ROOT }}/screener" hx-target="#results" hx-push-url="true"
-      hx-trigger="change, keyup changed delay:400ms from:input[name=q]">
+      hx-trigger="change[!event.target.closest('.saved-box')], keyup changed delay:400ms from:input[name=q]">
   <input type="hidden" name="submitted" value="1">
   <input type="hidden" name="sector" value="{{ filters.sector }}">
   <input type="hidden" name="sort" value="{{ filters.sort }}">
   <input type="hidden" name="desc" value="{{ '1' if filters.desc else '0' }}">
   {% macro num(name, value, placeholder) %}<input type="number" step="any" name="{{ name }}" value="{{ '' if value is none else value }}" placeholder="{{ placeholder }}">{% endmacro %}
-  <input type="search" name="q" value="{{ filters.q }}" placeholder="Buscar ticker o nombre" aria-label="Buscar ticker o nombre">
+  <div class="searchbar">
+    <input type="search" name="q" value="{{ filters.q }}" placeholder="Buscar ticker o nombre" aria-label="Buscar ticker o nombre">
+    {% if user %}
+    <div class="saved-box saved-pick">
+      <select id="saved-select" aria-label="Mis filtros guardados" onchange="applySavedFilter(this)">
+        <option value="{{ ROOT }}/screener" data-id="">Mis filtros</option>
+        {% for sf, url in saved_filters %}<option value="{{ url }}" data-id="{{ sf.id }}" {{ 'selected' if sf.id == active_filter }}>{{ sf.name }}</option>{% endfor %}
+      </select>
+      <button type="button" class="outline secondary" id="saved-delete" onclick="deleteSavedFilter()" {{ '' if active_filter else 'hidden' }} aria-label="Borrar el filtro guardado seleccionado" title="Borrar el filtro seleccionado"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg></button>
+    </div>
+    {% endif %}
+  </div>
   <details id="filters-box" class="filters-box">
     <summary><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg> Filtros <span class="badge" id="filters-count" hidden></span></summary>
     <div class="filters">
@@ -31,6 +42,15 @@
       </label>
       <label><input type="checkbox" name="dividend_only" value="1" {{ 'checked' if filters.dividend_only }}> Solo empresas con dividendo</label>
       <label><input type="checkbox" name="quality_only" value="1" {{ 'checked' if filters.quality_only }}> Solo dividendo sostenible</label>
+      <div class="saved-box save-row">
+        {% if user %}
+        <input type="text" id="saved-name" maxlength="40" placeholder="Nombre del filtro" aria-label="Nombre con el que guardar los filtros actuales"
+               onkeydown="if (event.key === 'Enter') { event.preventDefault(); saveFilter(); }">
+        <button type="button" class="outline" onclick="saveFilter()"><svg class="icon" aria-hidden="true"><use href="#i-save"/></svg> Guardar filtros</button>
+        {% else %}
+        <small class="muted"><a href="{{ ROOT }}/login?next={{ here }}">Entra</a> o <a href="{{ ROOT }}/register?next={{ here }}">crea una cuenta</a> para guardar tus filtros.</small>
+        {% endif %}
+      </div>
     </div>
   </details>
 </form>

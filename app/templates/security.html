@@ -106,12 +106,17 @@
 
 <section>
   <h4>Seguimiento</h4>
+  {% if not user %}
+  <p class="muted">Necesitas estar registrado para añadir empresas a seguimiento y ajustar su margen de seguridad y rentabilidad objetivo.
+    <a href="{{ ROOT }}/login?next={{ here }}&amp;reason=watch">Entrar</a> o <a href="{{ ROOT }}/register?next={{ here }}">crear cuenta</a>.</p>
+  {% else %}
   <form method="post" action="{{ ROOT }}/security/{{ sec.symbol }}/watch" class="grid">
     <label>Margen de seguridad (%)<input type="number" step="any" name="margin_of_safety" value="{{ (row.item.margin_of_safety * 100) if row.item.margin_of_safety is not none else '' }}" placeholder="{{ settings.margin_of_safety * 100 }}"></label>
     <label>Rentabilidad total objetivo (%)<input type="number" step="any" name="target_total_return" value="{{ (row.item.target_total_return * 100) if row.item.target_total_return is not none else '' }}" placeholder="{{ settings.target_total_return * 100 }}"></label>
     <label>Notas<input type="text" name="notes" value="{{ row.item.notes or '' }}"></label>
     <button type="submit">{{ 'Guardar' if watched else 'Guardar y seguir' }}</button>
   </form>
+  {% endif %}
 </section>
 <p class="muted"><small>Valoración calculada: {{ v.computed_at.strftime('%d/%m/%Y %H:%M') if v else '–' }} · Cotización: {{ row.quote.as_of.strftime('%d/%m/%Y') if row.quote and row.quote.as_of else '–' }}</small></p>
 

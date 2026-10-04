@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Crear cuenta' if mode == 'register' else 'Entrar' }} · Stock Screener{% endblock %}
+{% block content %}
+<article class="auth">
+  <h2>{{ 'Crear cuenta' if mode == 'register' else 'Entrar' }}</h2>
+  {% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ ROOT }}/{{ mode }}">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>Email
+      <input type="email" name="email" value="{{ email }}" autocomplete="email" maxlength="254" required autofocus>
+    </label>
+    <label>Contraseña
+      {% if mode == 'register' %}
+      <input type="password" name="password" autocomplete="new-password" minlength="{{ min_password }}" maxlength="200" required aria-describedby="pw-help">
+      <small id="pw-help" class="muted">Mínimo {{ min_password }} caracteres. No se puede recuperar si la pierdes.</small>
+      {% else %}
+      <input type="password" name="password" autocomplete="current-password" maxlength="200" required>
+      {% endif %}
+    </label>
+    <button type="submit">{{ 'Crear cuenta y entrar' if mode == 'register' else 'Entrar' }}</button>
+  </form>
+  <p class="muted">
+    {% if mode == 'register' %}¿Ya tienes cuenta? <a href="{{ ROOT }}/login?next={{ next | urlencode }}">Entrar</a>
+    {% else %}¿Primera vez? <a href="{{ ROOT }}/register?next={{ next | urlencode }}">Crear cuenta</a>{% endif %}
+  </p>
+</article>
+{% endblock %}
