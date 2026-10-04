@@ -1,5 +1,16 @@
 {% extends "base.html" %}
+{% block title %}Cartera · Stock Screener{% endblock %}
 {% block content %}
 <h2>Cartera</h2>
-<p>Próximamente: posiciones a partir de tus operaciones en HeyTrade, valoradas en EUR, y registro de los dividendos cobrados.</p>
+<div class="subtabs" role="navigation" aria-label="Secciones de la cartera">
+  {% for key, label in tabs.items() %}<a href="{{ ROOT }}/portfolio?tab={{ key }}"{% if key == tab %} aria-current="page" class="on"{% endif %}>{{ label }}</a>{% endfor %}
+</div>
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+{% if errors %}<article class="alert-hard" role="alert"><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></article>{% endif %}
+
+{% if tab == 'posiciones' %}{% include "_portfolio_positions.html" %}
+{% elif tab == 'dividendos' %}{% include "_portfolio_dividends.html" %}
+{% elif tab == 'fiscal' %}{% include "_portfolio_tax.html" %}
+{% elif tab == 'operaciones' %}{% include "_portfolio_operations.html" %}
+{% else %}{% include "_portfolio_import.html" %}{% endif %}
 {% endblock %}

@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from starlette.datastructures import QueryParams
 
-from app import auth, screener
+from app import auth, portfolio, screener
 from app.analysis import sectors, valuation
 from app.analysis.dividends import TtmIndex, analyze
 from app.config import get_settings, today, utcnow
@@ -202,7 +202,13 @@ COUNTRIES = {
 def _fmt_number(value, digits: int = 2) -> str:
     if value is None:
         return "–"
+    value = float(value)
     return f"{value:,.{digits}f}".replace(",", " ").replace(".", ",")
+
+
+def _d_norm(value) -> str:
+    text = f"{float(value):.6f}".rstrip("0").rstrip(".")
+    return text if text not in ("", "-0") else "0"
 
 
 def fmt(value, kind: str = "money") -> str:
@@ -211,7 +217,15 @@ def fmt(value, kind: str = "money") -> str:
         return "–"
     match kind:
         case "pct":
-            return _fmt_number(value * 100, 1) + " %"
+            return _fmt_number(float(value) * 100, 1) + " %"
+        case "spct":  # con signo
+            return f"{float(value) * 100:+,.1f}".replace(",", " ").replace(".", ",") + " %"
+        case "seur":
+            return f"{float(value):+,.2f}".replace(",", " ").replace(".", ",") + " €"
+        case "qty":  # acciones: sin ceros sobrantes
+            text = f"{_d_norm(value)}"
+            whole, _, frac = text.partition(".")
+            return f"{int(whole):,}".replace(",", " ") + (f",{frac}" if frac else "")
         case "x":
             return _fmt_number(value, 1)
         case "int":
@@ -220,6 +234,8 @@ def fmt(value, kind: str = "money") -> str:
             if value >= 1e9:
                 return _fmt_number(value / 1e9, 1) + " mil M€"
             return _fmt_number(value / 1e6, 0) + " M€"
+        case "eur":
+            return _fmt_number(value, 2) + " €"
         case "text":
             return str(value)
         case _:
@@ -235,7 +251,15 @@ def country_flag(country: str | None) -> tuple[str, str]:
     return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in code), name
 
 
+def gain_class(value) -> str:
+    """Clase CSS para colorear ganancias (verde) y pérdidas (rojo)."""
+    if value is None or isinstance(value, Undefined) or float(value) == 0:
+        return ""
+    return "pos" if float(value) > 0 else "neg"
+
+
 templates.env.filters["fmt"] = fmt
+templates.env.filters["gain"] = gain_class
 templates.env.filters["country_flag"] = country_flag
 templates.env.filters["flag_labels"] = lambda flags: "; ".join(
     FLAG_LABELS.get(f, f) for f in flags or []
@@ -435,6 +459,8 @@ def security_page(request: Request, symbol: str, session: DbSession, user: Curre
             "settings": get_settings(),
             "chart_data": _chart_data(row, closes, dividends),
             "hard_reasons": hard_flag_reasons(session, sec, row),
+            "position": portfolio.position_for(session, user.id, sec.id) if user else None,
+            "today": today(),
         },
     )
 
@@ -546,11 +572,6 @@ def update_watch(
     session.add(item)
     session.commit()
     return RedirectResponse(f"{ROOT}/security/{sec.symbol}", status_code=303)
-
-
-@router.get("/portfolio", response_class=HTMLResponse)
-def portfolio_page(request: Request, user: PortfolioUser):
-    return templates.TemplateResponse(request, "portfolio.html")
 
 
 # --- Cuenta: entrar, crear cuenta y salir -------------------------------------------

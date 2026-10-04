@@ -1,0 +1,50 @@
+HeyTrade opera a través de Beka Digital SL,
+agente de Beka Finance SV SA, entidad
+registrada en la CNMV con el número 36.
+
+
+Confirmación del abono de Dividendo Nacional
+Número de cliente                             00000000-0000-0000-0000-000000000000
+
+
+Número de cartera                             00000000-0000-0000-0000-000000000000
+
+
+Indicador de operación                        Dividendo Nacional
+
+
+Código ISIN                                   ES0112501012
+
+
+Nombre del valor                              Ebro Foods SA
+
+
+Divisa abono                                  EUR
+
+
+Importe unitario                              0,23
+
+
+Fecha ex-date                                 29/09/2026
+
+
+Fecha abono                                   01/10/2026
+
+
+Cantidad de acciones                          54
+
+
+Importe bruto                                 12,42 EUR
+
+
+Tipo de retención                             19,00%
+
+
+Importe de retención                          2,36 EUR
+
+
+Gastos, comisiones e impuestos                0,00 EUR
+
+
+Importe neto abonado                          10,06 EUR
+

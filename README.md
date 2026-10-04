@@ -13,7 +13,40 @@ universo comprable en HeyTrade).
    semáforo de compra, el rango de 52 semanas, la distancia a la media de 200 días y gráficos de
    precio, yield histórica y dividendo por año. Cada valor admite su propio margen de seguridad,
    rentabilidad objetivo y notas.
-3. **Cartera:** pendiente (será privada).
+3. **Cartera (privada):** posiciones valoradas en EUR, dividendos cobrados y proyectados, y resumen
+   fiscal. Ver [Cartera](#cartera).
+
+## Cartera
+
+Menú **Cartera** (solo con sesión). Todo se calcula a partir de tus operaciones, con **coste medio
+ponderado en EUR** (lo que pagaste de verdad, con el cambio y las comisiones del bróker). El valor
+usa la última cotización y el último tipo de cambio (USD, GBP y demás se pasan a EUR).
+
+- **Posiciones:** valor de la cartera, coste, revalorización, dividendos cobrados (bruto), total
+  return (revalorización + ventas realizadas + dividendos brutos, sobre lo invertido), dividendo
+  anual estimado, yield actual y *yield on cost* (dividendo anual a cambio actual ÷ coste). Por
+  valor: acciones, coste medio, P&L, dividendo anual y último dividendo (fecha ex e importe por
+  acción) con ▲/▼ frente al anterior. Reparto por sector, país y divisa. Yahoo no da la fecha de
+  anuncio del dividendo, por eso se muestra la fecha ex-dividendo.
+- **Dividendos:** proyección bruta de los próximos 12 meses (se repite el calendario de pagos de los
+  últimos 12 con el dividendo estimado actual) y lo cobrado por año.
+- **Fiscal:** por año de pago, bruto, retención en origen, retención en destino, gastos y neto
+  (en EUR), y por país del valor. Informativo: no sustituye al certificado del bróker.
+- **Operaciones:** compras, ventas y dividendos guardados, con borrado.
+- **Añadir e importar:**
+  - **PDFs de HeyTrade** (subida manual, varios a la vez): «Confirmación de operación» y
+    «Confirmación del abono». Se leen con `app/heytrade.py` (plantillas fijas, campos por
+    etiqueta) y los repetidos se ignoran (hash del PDF y comparación por contenido). Si el ISIN no
+    corresponde a ningún valor, se pide el ticker de Yahoo una vez (si el valor no está en el
+    universo, se da de alta y se descargan sus datos en segundo plano).
+  - **Importar posiciones:** `ticker o ISIN; acciones; coste medio en €`, una por línea, como una
+    compra a la fecha indicada (no repitas luego operaciones anteriores a esa fecha).
+  - **Compra o venta manual**, también desde la ficha del valor (bloque **Mi posición**).
+
+Plantillas reconocidas: compra y dividendo nacional (con ejemplos reales). La **venta** y el
+**dividendo extranjero** (retención en origen) se han supuesto con las mismas etiquetas y no están
+verificados con un PDF real. Los tests usan el texto de los PDFs sin datos personales
+(`tests/fixtures/heytrade/`).
 
 ## Cuentas de usuario
 

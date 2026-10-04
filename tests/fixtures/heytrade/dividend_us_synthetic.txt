@@ -1,0 +1,50 @@
+HeyTrade opera a través de Beka Digital SL,
+agente de Beka Finance SV SA, entidad
+registrada en la CNMV con el número 36.
+
+
+Confirmación del abono de Dividendo Extranjero
+Número de cliente                             00000000-0000-0000-0000-000000000000
+
+
+Número de cartera                             00000000-0000-0000-0000-000000000000
+
+
+Indicador de operación                        Dividendo Extranjero
+
+
+Código ISIN                                   US7561091049
+
+
+Nombre del valor                              Realty Income Corp.
+
+
+Divisa abono                                  USD
+
+
+Importe unitario                              0,23
+
+
+Fecha ex-date                                 29/09/2026
+
+
+Fecha abono                                   01/10/2026
+
+
+Cantidad de acciones                          54
+
+
+Importe bruto                                 12,42 USD
+
+
+Tipo de retención                             15,00%
+
+
+Importe de retención en origen                1,86 USD
+
+
+Gastos, comisiones e impuestos                0,00 USD
+
+
+Importe neto abonado                          10,56 USD
+
