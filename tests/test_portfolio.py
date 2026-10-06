@@ -77,8 +77,10 @@ def _db():
 def _user(client, email):
     from sqlalchemy import select
 
+    from app import auth
     from app.models import User
 
+    auth._failures.clear()  # el límite de altas es por IP y todos los tests comparten la suya
     client.cookies.clear()
     register(client, email)
     with _db() as s:
@@ -295,3 +297,72 @@ def test_delete_guards(client):
     other = _user(client, "ajeno@example.com")
     assert client.post(f"/portfolio/transactions/{buy_id}/delete").status_code == 404
     assert other.id != uid
+
+
+def test_import_position_with_received_dividends(client):
+    user = _user(client, "impdiv@example.com")
+    r = client.post(
+        "/portfolio/positions",
+        data={"text": "BBB.MC; 100; 18; 25,50\nAAA; 10; 50", "as_of": "2026-01-02"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    with _db() as s:
+        rows = {p.security.symbol: p for p in portfolio.positions(s, user.id)}
+        bbb = rows["BBB.MC"]
+        assert bbb.dividends_gross_eur == D("25.50") and bbb.dividends_net_eur == D("25.50")
+        assert rows["AAA"].dividends_gross_eur == 0
+        # cuenta en el total return, pero no en el resumen fiscal
+        assert bbb.total_return_eur == pytest.approx(bbb.unrealized_eur + 25.5)
+        assert portfolio.tax_summary(s, user.id) == []
+        assert portfolio.imported_dividends_eur(s, user.id) == pytest.approx(25.5)
+    assert "importados con la posición" in client.get("/portfolio?tab=dividendos").text
+    assert "Importado" in client.get("/portfolio?tab=operaciones").text
+    bad = client.post("/portfolio/positions", data={"text": "AAA; 1; 1; -3"})
+    assert bad.status_code == 400
+    lines, errors = portfolio.parse_positions(_db(), "AAA 1 2 3 4")
+    assert not lines and errors
+
+
+def test_manual_received_dividend(client):
+    user = _user(client, "mandiv@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50", "as_of": "2026-01-02"})
+    r = client.post(
+        "/portfolio/dividends",
+        data={
+            "ident": "AAA",
+            "pay_date": "2026-03-15",
+            "shares": "10",
+            "gross": "8,50",
+            "withholding_origin": "1,28",
+            "back": "/security/AAA",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and r.headers["location"].endswith("/security/AAA?done=op")
+    with _db() as s:
+        (pos,) = portfolio.positions(s, user.id)
+        (year,) = portfolio.tax_summary(s, user.id)
+        fx = D(str(pos.fx))
+        assert pos.dividends_gross_eur == pytest.approx(D("8.50") * fx, rel=D("1e-6"))
+        assert year.origin_eur == pytest.approx(float(D("1.28") * fx), rel=1e-6)
+        assert year.net_eur == pytest.approx(float(D("7.22") * fx), abs=0.01)
+    dup = client.post(
+        "/portfolio/dividends",
+        data={
+            "ident": "AAA",
+            "pay_date": "2026-03-15",
+            "shares": "10",
+            "gross": "8,50",
+            "withholding_origin": "1,28",
+        },
+    )
+    assert dup.status_code == 400 and "igual" in dup.text
+    for data in (
+        {"gross": "1", "withholding_origin": "5"},
+        {"pay_date": "2999-01-01"},
+        {"ident": "NOPE"},
+    ):
+        body = {"ident": "AAA", "pay_date": "2026-04-01", "shares": "10", "gross": "2", **data}
+        assert client.post("/portfolio/dividends", data=body).status_code == 400
+    assert "Mi posición" in client.get("/security/AAA").text

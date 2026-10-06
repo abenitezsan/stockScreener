@@ -39,9 +39,15 @@ usa la última cotización y el último tipo de cambio (USD, GBP y demás se pas
     etiqueta) y los repetidos se ignoran (hash del PDF y comparación por contenido). Si el ISIN no
     corresponde a ningún valor, se pide el ticker de Yahoo una vez (si el valor no está en el
     universo, se da de alta y se descargan sus datos en segundo plano).
-  - **Importar posiciones:** `ticker o ISIN; acciones; coste medio en €`, una por línea, como una
-    compra a la fecha indicada (no repitas luego operaciones anteriores a esa fecha).
-  - **Compra o venta manual**, también desde la ficha del valor (bloque **Mi posición**).
+  - **Importar posiciones:** `ticker o ISIN; acciones; coste medio en €; dividendos cobrados en €`
+    (el último dato es opcional), una por línea, como una compra a la fecha indicada (no repitas
+    luego operaciones anteriores a esa fecha). Los dividendos ya cobrados cuentan en el total
+    return, pero no en el resumen fiscal (no se conoce su año ni sus retenciones).
+  - **Compra, venta o dividendo cobrado manuales** (con bruto y retenciones en origen y destino),
+    también desde la ficha del valor (bloque **Mi posición**).
+
+Los dividendos **no se añaden solos**: entran por PDF de HeyTrade o a mano. La proyección es solo una
+previsión y no genera cobros.
 
 Plantillas reconocidas: compra y dividendo nacional (con ejemplos reales). La **venta** y el
 **dividendo extranjero** (retención en origen) se han supuesto con las mismas etiquetas y no están
