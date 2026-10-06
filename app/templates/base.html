@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Stock Screener{% endblock %}</title>
   <link rel="stylesheet" href="{{ ROOT }}/static/vendor/pico-2.0.6.min.css">
-  <link rel="stylesheet" href="{{ ROOT }}/static/app.css">
+  <link rel="stylesheet" href="{{ ROOT }}/static/app.css?v={{ ASSET_V }}">
   <script src="{{ ROOT }}/static/vendor/htmx-2.0.4.min.js" defer></script>
-  <script src="{{ ROOT }}/static/app.js" defer></script>
+  <script src="{{ ROOT }}/static/app.js?v={{ ASSET_V }}" defer></script>
   {% block head %}{% endblock %}
 </head>
 <body data-root="{{ ROOT }}">

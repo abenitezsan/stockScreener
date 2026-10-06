@@ -1,7 +1,8 @@
-<section>
+<div class="import-grid">
+<article>
   <h4>PDFs de HeyTrade</h4>
   <p class="muted">Confirmaciones de operación (compra/venta) y de abono de dividendo. Puedes subir varios a la vez; los repetidos se ignoran.</p>
-  <form method="post" action="{{ ROOT }}/portfolio/upload" enctype="multipart/form-data">
+  <form method="post" action="{{ ROOT }}/portfolio/upload" enctype="multipart/form-data" class="stack">
     <input type="file" name="files" accept="application/pdf,.pdf" multiple required>
     <button type="submit">Leer PDFs</button>
   </form>
@@ -18,19 +19,20 @@
       {% else %}<span class="neg">✗</span> {{ r.message }}{% endif %}</td></tr>{% endfor %}
   </tbody></table>
   {% endif %}
-</section>
+</article>
 
-<section>
+<article>
   <h4>Importar posiciones</h4>
   <p class="muted">Una por línea: <code>ticker o ISIN; acciones; coste medio en €</code>, por ejemplo <code>O; 11; 48,60</code>. Se guardan como una compra a la fecha indicada: si luego subes PDFs, no repitas operaciones anteriores a esa fecha.</p>
-  <form method="post" action="{{ ROOT }}/portfolio/positions">
+  <form method="post" action="{{ ROOT }}/portfolio/positions" class="stack">
     <textarea name="text" rows="6" placeholder="SAN.MC; 100; 3,85&#10;O; 11; 48,60" required></textarea>
     <label>Posiciones a fecha de <input type="date" name="as_of" value="{{ today.isoformat() }}" max="{{ today.isoformat() }}"></label>
     <button type="submit">Importar</button>
   </form>
-</section>
+</article>
 
-<section>
+<article class="wide">
   <h4>Añadir compra o venta</h4>
   {% include "_portfolio_tx_form.html" %}
-</section>
+</article>
+</div>

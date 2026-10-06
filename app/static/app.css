@@ -281,10 +281,36 @@ form.inline { display: inline-flex; gap: 0.4rem; margin: 0.3rem 0 0; }
 form.inline input, form.inline button { margin: 0; padding: 0.2rem 0.5rem; font-size: 0.8rem; width: auto; }
 .tx-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); gap: 0 0.8rem; align-items: end; }
 .tx-form label { font-size: 0.8rem; }
-table button.link { background: none; border: 0; padding: 0; margin: 0; width: auto; color: var(--status-critical); font-size: 0.8rem; cursor: pointer; }
+table button.danger { margin: 0; width: auto; padding: 0.2rem 0.7rem; font-size: 0.8rem; background: none;
+                      color: var(--status-critical); border: 1px solid var(--status-critical); }
+table button.danger:hover { background: var(--status-critical); color: #fff; }
 table form { margin: 0; }
 .scroll-x { overflow-x: auto; }
 @media (max-width: 767.98px) {
   main table.positions th, main table.positions td { white-space: nowrap; }
   .bar-row { grid-template-columns: 6rem 1fr 3.5rem; }
+}
+
+.subtabs { gap: 0.5rem; }
+.subtabs a { padding: 0.45rem 1rem; }
+.subtabs a:not(.on):hover { background: var(--hi-bg); }
+.bars { max-width: 44rem; margin-bottom: 0.75rem; }
+.import-grid { display: grid; grid-template-columns: 1fr; gap: 1rem; align-items: start; }
+.import-grid article { margin: 0; }
+.import-grid h4 { font-size: 1.1rem; }
+form.stack { display: grid; gap: 0.6rem; justify-items: start; }
+form.stack > * { margin: 0; }
+form.stack textarea, form.stack input[type=file] { width: 100%; }
+form.stack label { display: flex; align-items: center; gap: 0.6rem; }
+form.stack label input { margin: 0; width: auto; }
+form.stack button, .tx-form button { width: auto; margin: 0; }
+.tx-form { align-items: end; row-gap: 0.4rem; }
+.tx-form label, .tx-form button { margin: 0; }
+.tx-form input, .tx-form select { margin-bottom: 0; }
+@media (min-width: 992px) {
+  .import-grid { grid-template-columns: 1fr 1fr; }
+  .import-grid article.wide { grid-column: 1 / -1; }
+}
+@media (max-width: 767.98px) {
+  main .scroll-x table th, main .scroll-x table td { white-space: nowrap; }
 }

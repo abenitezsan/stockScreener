@@ -143,5 +143,5 @@
 <p class="muted"><small>Valoración calculada: {{ v.computed_at.strftime('%d/%m/%Y %H:%M') if v else '–' }} · Cotización: {{ row.quote.as_of.strftime('%d/%m/%Y') if row.quote and row.quote.as_of else '–' }}</small></p>
 
 <script type="application/json" id="chart-data">{{ chart_data | tojson }}</script>
-<script src="{{ ROOT }}/static/charts.js" defer></script>
+<script src="{{ ROOT }}/static/charts.js?v={{ ASSET_V }}" defer></script>
 {% endblock %}

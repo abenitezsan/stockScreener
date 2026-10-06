@@ -265,8 +265,18 @@ templates.env.filters["flag_labels"] = lambda flags: "; ".join(
     FLAG_LABELS.get(f, f) for f in flags or []
 )
 ROOT = get_settings().root_path.rstrip("/")
+
+
+def _asset_version() -> str:
+    """Cambia cuando cambia algún estático propio: obliga al navegador a descargarlo de nuevo."""
+    static = Path(__file__).parent / "static"
+    stamp = max((static / name).stat().st_mtime_ns for name in ("app.css", "app.js", "charts.js"))
+    return format(stamp // 1_000_000_000, "x")
+
+
 templates.env.globals.update(
     ROOT=ROOT,
+    ASSET_V=_asset_version(),
     FLAG_LABELS=FLAG_LABELS,
     HARD_FLAGS=HARD_FLAGS,
     SECTORS=SECTORS,
