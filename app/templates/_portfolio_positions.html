@@ -1,0 +1,69 @@
+{% set s = summary %}
+{% if not rows and not closed %}
+<p>Aún no tienes posiciones. <a href="{{ ROOT }}/portfolio?tab=importar">Importa tus posiciones, sube los PDFs de HeyTrade o añade una compra</a>.</p>
+{% else %}
+{% macro card(label, value, cls='', sub='') %}<article><div class="label">{{ label }}</div><div class="value {{ cls }}">{{ value }}</div>{% if sub %}<div class="label {{ cls }}">{{ sub }}</div>{% endif %}</article>{% endmacro %}
+<div class="cards">
+  {{ card('Valor de la cartera', s.value_eur | fmt('eur'), '', ((s.day_change_eur | fmt('seur')) ~ ' hoy') if s.day_change_eur else '') }}
+  {{ card('Coste', s.cost_eur | fmt('eur')) }}
+  {{ card('Revalorización', s.unrealized_eur | fmt('seur'), s.unrealized_eur | gain, s.unrealized_pct | fmt('spct')) }}
+  {{ card('Dividendos cobrados (bruto)', s.dividends_gross_eur | fmt('eur')) }}
+  {{ card('Total return', s.total_return_eur | fmt('seur'), s.total_return_eur | gain, s.total_return_pct | fmt('spct')) }}
+  {{ card('Dividendo anual estimado', s.annual_dividend_eur | fmt('eur')) }}
+  {{ card('Yield actual', s.yield_now | fmt('pct')) }}
+  {{ card('Yield on cost', s.yoc | fmt('pct')) }}
+</div>
+{% if s.missing_prices %}<p class="muted"><small>Sin cotización o tipo de cambio, fuera de los totales: {{ s.missing_prices | join(', ') }}.</small></p>{% endif %}
+<p class="muted"><small>Importes en {{ base_currency }}. El coste es lo que pagaste (cambio y comisiones del bróker); el valor usa el último cambio. Total return = revalorización + ventas realizadas + dividendos brutos, sobre lo invertido.</small></p>
+
+<div class="scroll-x">
+<table class="striped positions">
+  <thead><tr>
+    <th>Valor</th><th class="num">Acciones</th><th class="num">Coste medio</th><th class="num">Precio</th>
+    <th class="num">Valor €</th><th class="num">Revalorización</th><th class="num">Total return</th>
+    <th class="num">Dividendo anual</th><th class="num">Yield</th><th class="num">YOC</th><th>Último dividendo</th>
+  </tr></thead>
+  <tbody>
+  {% for p in rows %}{% set sec = p.security %}{% set ld = p.last_dividend %}
+    <tr>
+      <td><a href="{{ ROOT }}/security/{{ sec.symbol }}"><strong>{{ sec.symbol }}</strong></a><br><small class="muted">{{ sec.name or '' }}</small></td>
+      <td class="num">{{ p.shares | fmt('qty') }}</td>
+      <td class="num">{{ p.avg_cost_eur | fmt('eur') }}</td>
+      <td class="num">{{ p.price | fmt }} {{ sec.currency or '' }}</td>
+      <td class="num"><strong>{{ p.value_eur | fmt('eur') }}</strong></td>
+      <td class="num {{ p.unrealized_eur | gain }}">{{ p.unrealized_eur | fmt('seur') }}<br><small>{{ p.unrealized_pct | fmt('spct') }}</small></td>
+      <td class="num {{ p.total_return_eur | gain }}">{{ p.total_return_eur | fmt('seur') }}<br><small>{{ p.total_return_pct | fmt('spct') }}</small></td>
+      <td class="num">{{ p.annual_dividend_eur | fmt('eur') }}</td>
+      <td class="num">{{ p.current_yield | fmt('pct') }}</td>
+      <td class="num">{{ p.yoc | fmt('pct') }}</td>
+      <td>{% if ld %}{{ ld.ex_date.strftime('%d/%m/%Y') }} · {{ ld.amount | fmt }}
+        {% if ld.change is not none and ld.change > 0.0005 %}<span class="pos" title="Sube {{ ld.change | fmt('pct') }}">▲ {{ ld.change | fmt('pct') }}</span>
+        {% elif ld.change is not none and ld.change < -0.0005 %}<span class="neg" title="Baja {{ (-ld.change) | fmt('pct') }}">▼ {{ (-ld.change) | fmt('pct') }}</span>
+        {% elif ld.change is not none %}<span class="muted">=</span>{% endif %}{% else %}–{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="muted"><small>Último dividendo: fecha ex-dividendo e importe por acción en la divisa del valor, con la variación frente al anterior (Yahoo no da la fecha de anuncio). YOC = dividendo anual a cambio actual ÷ coste de la posición.</small></p>
+
+<div class="charts">
+  {% for title, data in [('Por sector', by_sector), ('Por país', by_country), ('Por divisa', by_currency)] %}
+  <article><h6>{{ title }}</h6>
+    {% for label, amount in data %}{% set pct = amount / s.value_eur if s.value_eur else 0 %}
+    <div class="bar-row"><span class="bar-label">{{ SECTORS.get(label, ('', label))[1] if title == 'Por sector' else label }}</span>
+      <span class="bar" style="--w: {{ (pct * 100) | round(1) }}%"></span><span class="bar-val">{{ pct | fmt('pct') }}</span></div>
+    {% endfor %}
+  </article>
+  {% endfor %}
+</div>
+
+{% if closed %}
+<details><summary>Posiciones cerradas ({{ closed | length }})</summary>
+<table><thead><tr><th>Valor</th><th class="num">Resultado vendido</th><th class="num">Dividendos (bruto)</th><th class="num">Total return</th></tr></thead><tbody>
+  {% for p in closed %}<tr><td><a href="{{ ROOT }}/security/{{ p.security.symbol }}">{{ p.security.symbol }}</a></td>
+    <td class="num {{ p.realized_eur | gain }}">{{ p.realized_eur | fmt('seur') }}</td><td class="num">{{ p.dividends_gross_eur | fmt('eur') }}</td>
+    <td class="num {{ (p.realized_eur + p.dividends_gross_eur) | gain }}">{{ (p.realized_eur + p.dividends_gross_eur) | fmt('seur') }}</td></tr>{% endfor %}
+</tbody></table></details>
+{% endif %}
+{% endif %}

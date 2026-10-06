@@ -1,0 +1,26 @@
+<p class="muted">Dividendos por año de pago con el bruto y las retenciones, convertidos a EUR con el cambio de cada abono. Informativo: no sustituye al certificado fiscal del bróker.</p>
+{% for y in years %}
+<section>
+  <h4>{{ y.year }}</h4>
+  <div class="cards">
+    <article><div class="label">Bruto</div><div class="value">{{ y.gross_eur | fmt('eur') }}</div></article>
+    <article><div class="label">Retención en origen</div><div class="value">{{ y.origin_eur | fmt('eur') }}</div></article>
+    <article><div class="label">Retención en destino</div><div class="value">{{ y.domestic_eur | fmt('eur') }}</div></article>
+    <article><div class="label">Gastos</div><div class="value">{{ y.fees_eur | fmt('eur') }}</div></article>
+    <article><div class="label">Neto cobrado</div><div class="value">{{ y.net_eur | fmt('eur') }}</div></article>
+  </div>
+  <details><summary>Por país del valor</summary>
+  <table><thead><tr><th>País</th><th class="num">Bruto</th><th class="num">Ret. origen</th><th class="num">Ret. destino</th></tr></thead><tbody>
+    {% for country, c in y.by_country.items() %}<tr><td>{{ (country | country_flag)[0] }} {{ (country | country_flag)[1] }}</td><td class="num">{{ c.gross | fmt('eur') }}</td><td class="num">{{ c.origin | fmt('eur') }}</td><td class="num">{{ c.domestic | fmt('eur') }}</td></tr>{% endfor %}
+  </tbody></table></details>
+  <div class="scroll-x"><table class="striped">
+    <thead><tr><th>Pago</th><th>Valor</th><th class="num">Acciones</th><th class="num">Bruto</th><th class="num">Ret. origen</th><th class="num">Ret. destino</th><th class="num">Tipo</th><th class="num">Neto €</th></tr></thead>
+    <tbody>{% for r in y.rows %}<tr>
+      <td>{{ r.payment.pay_date.strftime('%d/%m/%Y') }}</td><td><a href="{{ ROOT }}/security/{{ r.security.symbol }}">{{ r.security.symbol }}</a></td>
+      <td class="num">{{ r.payment.shares | fmt('qty') }}</td>
+      <td class="num">{{ r.payment.gross | fmt }} {{ r.payment.currency }}</td>
+      <td class="num">{{ r.payment.withholding_origin | fmt }}</td><td class="num">{{ r.payment.withholding_domestic | fmt }}</td>
+      <td class="num">{{ r.payment.withholding_rate | fmt('pct') }}</td><td class="num">{{ r.net_eur | fmt('eur') }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</section>
+{% else %}<p>Aún no hay dividendos cobrados.</p>{% endfor %}

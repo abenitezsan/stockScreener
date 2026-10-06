@@ -1,0 +1,36 @@
+<section>
+  <h4>PDFs de HeyTrade</h4>
+  <p class="muted">Confirmaciones de operación (compra/venta) y de abono de dividendo. Puedes subir varios a la vez; los repetidos se ignoran.</p>
+  <form method="post" action="{{ ROOT }}/portfolio/upload" enctype="multipart/form-data">
+    <input type="file" name="files" accept="application/pdf,.pdf" multiple required>
+    <button type="submit">Leer PDFs</button>
+  </form>
+  {% if results %}
+  <table><thead><tr><th>Fichero</th><th>Resultado</th></tr></thead><tbody>
+    {% for r in results %}<tr><td>{{ r.filename }}</td><td>
+      {% if r.status == 'ok' %}<span class="pos">✓</span> {{ r.message }}
+      {% elif r.status == 'duplicate' %}<span class="muted">= {{ r.message }}</span>
+      {% elif r.status == 'unknown_isin' %}<span class="neg">?</span> {{ r.message }} ({{ r.isin }})
+        <form method="post" action="{{ ROOT }}/portfolio/isin" class="inline">
+          <input type="hidden" name="isin" value="{{ r.isin }}">
+          <input type="text" name="symbol" placeholder="Ticker de Yahoo (EBRO.MC)" required maxlength="32" pattern="[A-Za-z0-9.\-^=]+">
+          <button type="submit">Asignar</button></form>
+      {% else %}<span class="neg">✗</span> {{ r.message }}{% endif %}</td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+</section>
+
+<section>
+  <h4>Importar posiciones</h4>
+  <p class="muted">Una por línea: <code>ticker o ISIN; acciones; coste medio en €</code>, por ejemplo <code>O; 11; 48,60</code>. Se guardan como una compra a la fecha indicada: si luego subes PDFs, no repitas operaciones anteriores a esa fecha.</p>
+  <form method="post" action="{{ ROOT }}/portfolio/positions">
+    <textarea name="text" rows="6" placeholder="SAN.MC; 100; 3,85&#10;O; 11; 48,60" required></textarea>
+    <label>Posiciones a fecha de <input type="date" name="as_of" value="{{ today.isoformat() }}" max="{{ today.isoformat() }}"></label>
+    <button type="submit">Importar</button>
+  </form>
+</section>
+
+<section>
+  <h4>Añadir compra o venta</h4>
+  {% include "_portfolio_tx_form.html" %}
+</section>

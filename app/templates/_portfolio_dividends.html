@@ -1,0 +1,21 @@
+{% set mx = (projection.months | map(attribute=2) | max) or 1 %}
+<div class="cards">
+  <article><div class="label">Próximos 12 meses (bruto)</div><div class="value">{{ projection.total_eur | fmt('eur') }}</div></article>
+  <article><div class="label">Media mensual</div><div class="value">{{ (projection.total_eur / 12) | fmt('eur') }}</div></article>
+  <article><div class="label">Yield on cost</div><div class="value">{{ summary.yoc | fmt('pct') }}</div></article>
+  <article><div class="label">Cobrado hasta hoy (bruto)</div><div class="value">{{ summary.dividends_gross_eur | fmt('eur') }}</div></article>
+</div>
+<h4>Proyección mensual</h4>
+{% for year, month, amount in projection.months %}
+  <div class="bar-row wide"><span class="bar-label">{{ ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][month - 1] }} {{ year }}</span>
+    <span class="bar" style="--w: {{ (amount / mx * 100) | round(1) }}%"></span><span class="bar-val">{{ amount | fmt('eur') }}</span></div>
+{% endfor %}
+<p class="muted"><small>Se repite el calendario de pagos de los últimos 12 meses (mes de la fecha ex-dividendo, así que el cobro llega algo después) con el dividendo estimado actual y tus acciones de hoy, a cambio actual y en bruto.
+{% if projection.estimated %} Sin calendario conocido, repartido por igual: {{ projection.estimated | join(', ') }}.{% endif %}</small></p>
+
+<h4>Cobrado por año</h4>
+{% if received %}
+<table><thead><tr><th>Año</th><th class="num">Bruto</th><th class="num">Neto cobrado</th></tr></thead><tbody>
+  {% for y in received %}<tr><td>{{ y.year }}</td><td class="num">{{ y.gross_eur | fmt('eur') }}</td><td class="num">{{ y.net_eur | fmt('eur') }}</td></tr>{% endfor %}
+</tbody></table>
+{% else %}<p class="muted">Aún no hay dividendos cobrados. Sube los PDFs «Confirmación del abono» de HeyTrade.</p>{% endif %}

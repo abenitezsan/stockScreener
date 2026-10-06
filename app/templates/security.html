@@ -16,6 +16,28 @@
 </article>
 {% endif %}
 
+{% if user %}
+<section class="my-position">
+  <h4>Mi posición</h4>
+  {% if position %}{% set q = position %}
+  <div class="cards">
+    <article><div class="label">Acciones</div><div class="value">{{ q.shares | fmt('qty') }}</div></article>
+    <article><div class="label">Coste medio</div><div class="value">{{ q.avg_cost_eur | fmt('eur') }}</div></article>
+    <article><div class="label">Valor</div><div class="value">{{ q.value_eur | fmt('eur') }}</div></article>
+    <article><div class="label">Revalorización</div><div class="value {{ q.unrealized_eur | gain }}">{{ q.unrealized_eur | fmt('seur') }}</div><div class="label {{ q.unrealized_eur | gain }}">{{ q.unrealized_pct | fmt('spct') }}</div></article>
+    <article><div class="label">Dividendos cobrados</div><div class="value">{{ q.dividends_gross_eur | fmt('eur') }}</div><div class="label">bruto</div></article>
+    <article><div class="label">Total return</div><div class="value {{ q.total_return_eur | gain }}">{{ q.total_return_eur | fmt('seur') }}</div><div class="label {{ q.total_return_eur | gain }}">{{ q.total_return_pct | fmt('spct') }}</div></article>
+    <article><div class="label">Dividendo anual</div><div class="value">{{ q.annual_dividend_eur | fmt('eur') }}</div></article>
+    <article><div class="label">Yield on cost</div><div class="value">{{ q.yoc | fmt('pct') }}</div></article>
+  </div>
+  {% else %}<p class="muted">No tienes este valor en cartera.</p>{% endif %}
+  <details><summary>Añadir compra o venta</summary>
+    {% with sec_symbol=sec.symbol, sec_currency=sec.currency %}{% include "_portfolio_tx_form.html" %}{% endwith %}
+  </details>
+  {% if position %}<p><small><a href="{{ ROOT }}/portfolio">Ver toda la cartera</a></small></p>{% endif %}
+</section>
+{% endif %}
+
 <div class="cards">
   {% macro card(label, value) %}<article><div class="label">{{ label }}</div><div class="value">{{ value }}</div></article>{% endmacro %}
   {{ card('Precio', p | fmt) }}

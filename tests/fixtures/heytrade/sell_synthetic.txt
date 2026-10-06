@@ -1,0 +1,64 @@
+Heytrade Tech SL, agente de Beka
+Finance SV SA, entidad registrada
+en la CNMV con el número 36.
+
+
+
+
+Confirmación de operación
+Número de cliente                   00000000-0000-0000-0000-000000000000
+
+
+Número de cartera                   00000000-0000-0000-0000-000000000000
+
+
+Indicador de compra/venta           Venta
+
+
+Tipo de orden                       Mercado
+
+
+Fecha y hora de ejecución           02/10/2026 - 14:04:35 (GMT)
+
+
+Código ISIN                         US7561091049
+
+
+Nombre del valor                    Realty Income Corp.
+
+
+Centro de negociación               BEST
+
+
+Cantidad                            11
+
+
+Precio unitario y divisa            55,3950 USD
+
+
+Efectivo bruto                      609,35 USD
+
+
+Impuestos                           0,00 USD
+
+
+Subtotal                            609,35 USD
+
+
+Tipo de cambio base                 0,87728
+
+
+Tipo de cambio + comisión           0,878157
+
+
+Comisión por cambio de divisa       0,54 EUR
+
+
+Subtotal EUR                        535,11 EUR
+
+
+Comisión de ejecución               2,00 EUR
+
+
+Total en euros                      537,11 EUR
+

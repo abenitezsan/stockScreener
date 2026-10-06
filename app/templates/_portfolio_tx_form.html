@@ -1,0 +1,12 @@
+<form method="post" action="{{ ROOT }}/portfolio/transactions" class="tx-form">
+  {% if sec_symbol %}<input type="hidden" name="ident" value="{{ sec_symbol }}"><input type="hidden" name="back" value="/security/{{ sec_symbol }}">
+  {% else %}<label>Ticker o ISIN<input type="text" name="ident" required maxlength="32"></label>{% endif %}
+  <label>Tipo<select name="kind"><option value="buy">Compra</option><option value="sell">Venta</option></select></label>
+  <label>Fecha<input type="date" name="trade_date" value="{{ today.isoformat() }}" max="{{ today.isoformat() }}" required></label>
+  <label>Acciones<input type="text" inputmode="decimal" name="quantity" required></label>
+  <label>Precio<input type="text" inputmode="decimal" name="price" required></label>
+  <label>Divisa<input type="text" name="currency" placeholder="{{ sec_currency or 'la del valor' }}" maxlength="3"></label>
+  <label>Cambio a €<input type="text" inputmode="decimal" name="fx_rate" placeholder="automático"></label>
+  <label>Comisiones (€)<input type="text" inputmode="decimal" name="fees" value="0"></label>
+  <button type="submit">Guardar</button>
+</form>

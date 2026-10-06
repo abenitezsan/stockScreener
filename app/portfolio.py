@@ -1,0 +1,668 @@
+"""Cartera: posiciones, valor en EUR, dividendos cobrados, proyección y resumen fiscal.
+
+Todo se calcula a partir de las operaciones (`Transaction`) y los dividendos cobrados
+(`DividendPayment`) de cada usuario. Coste medio ponderado, en EUR (lo que pagaste de verdad,
+con el tipo de cambio y las comisiones del bróker). Los precios de mercado se convierten con
+el último tipo de cambio conocido.
+"""
+
+import re
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import date, timedelta
+from decimal import Decimal
+
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import Session
+
+from app import heytrade
+from app.config import get_settings, today
+from app.jobs import latest_fx
+from app.models import (
+    DividendEvent,
+    DividendPayment,
+    Quote,
+    Security,
+    Transaction,
+    Valuation,
+)
+
+ZERO = Decimal(0)
+SYMBOL_RE = re.compile(r"^[A-Z0-9][A-Z0-9.\-^=]{0,31}$")
+MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"]
+
+
+class PortfolioError(ValueError):
+    """Dato no válido o incoherente en la cartera (se enseña tal cual al usuario)."""
+
+
+class DuplicateError(PortfolioError):
+    """La operación o el dividendo ya estaba guardado."""
+
+
+def _d(value) -> Decimal:
+    return value if isinstance(value, Decimal) else Decimal(str(value))
+
+
+# --- Alta de operaciones y dividendos ---------------------------------------------------
+
+
+def find_security(session: Session, ident: str) -> Security | None:
+    """Valor por ticker de Yahoo o por ISIN."""
+    ident = ident.strip().upper()
+    return session.scalar(
+        select(Security).where(or_(Security.symbol == ident, Security.isin == ident)).limit(1)
+    )
+
+
+def _simulate(txs: list[Transaction]) -> None:
+    shares = ZERO
+    for t in sorted(txs, key=lambda t: (t.trade_date, t.id or 0)):
+        shares += t.quantity if t.kind == "buy" else -t.quantity
+        if shares < 0:
+            raise PortfolioError(
+                f"Vendes más acciones de las que tenías el {t.trade_date:%d/%m/%Y}. "
+                "¿Falta importar la posición o una compra anterior?"
+            )
+
+
+def add_transaction(
+    session: Session,
+    user_id: int,
+    security: Security,
+    *,
+    kind: str,
+    trade_date: date,
+    quantity: Decimal,
+    total_eur: Decimal,
+    price: Decimal | None = None,
+    currency: str | None = None,
+    fx_rate: Decimal = Decimal(1),
+    fees: Decimal = ZERO,
+    source: str = "manual",
+    external_id: str | None = None,
+    notes: str | None = None,
+) -> Transaction:
+    """Guarda una operación. Falla si es un duplicado o deja la posición en negativo."""
+    if kind not in ("buy", "sell"):
+        raise PortfolioError("La operación debe ser compra o venta")
+    if quantity <= 0 or total_eur <= 0 or fees < 0 or fx_rate <= 0:
+        raise PortfolioError("Cantidad, importe y tipo de cambio deben ser positivos")
+    if trade_date > today() + timedelta(days=1):
+        raise PortfolioError("La fecha no puede ser futura")
+    if external_id and session.scalar(
+        select(Transaction.id).where(
+            Transaction.user_id == user_id, Transaction.external_id == external_id
+        )
+    ):
+        raise DuplicateError("Este PDF ya estaba cargado")
+    if source == "pdf" and session.scalar(
+        select(Transaction.id).where(
+            Transaction.user_id == user_id,
+            Transaction.security_id == security.id,
+            Transaction.kind == kind,
+            Transaction.trade_date == trade_date,
+            Transaction.quantity == quantity,
+            Transaction.total_eur == total_eur,
+        )
+    ):
+        raise DuplicateError("Ya hay una operación igual (¿añadida a mano?)")
+    existing = list(
+        session.scalars(
+            select(Transaction).where(
+                Transaction.user_id == user_id, Transaction.security_id == security.id
+            )
+        )
+    )
+    tx = Transaction(
+        user_id=user_id,
+        security_id=security.id,
+        kind=kind,
+        trade_date=trade_date,
+        quantity=quantity,
+        price=price,
+        currency=currency or security.currency or get_settings().base_currency,
+        fx_rate=fx_rate,
+        fees=fees,
+        total_eur=total_eur,
+        source=source,
+        external_id=external_id,
+        notes=(notes or None),
+    )
+    _simulate([*existing, tx])
+    session.add(tx)
+    session.commit()
+    return tx
+
+
+def manual_total_eur(
+    kind: str, quantity: Decimal, price: Decimal, fx_rate: Decimal, fees: Decimal
+) -> Decimal:
+    gross = quantity * price * fx_rate
+    return gross + fees if kind == "buy" else gross - fees
+
+
+def add_dividend(
+    session: Session, user_id: int, security: Security, doc: heytrade.DividendDoc, source: str
+) -> DividendPayment:
+    if doc.external_id and session.scalar(
+        select(DividendPayment.id).where(
+            DividendPayment.user_id == user_id, DividendPayment.external_id == doc.external_id
+        )
+    ):
+        raise DuplicateError("Este PDF ya estaba cargado")
+    if session.scalar(
+        select(DividendPayment.id).where(
+            DividendPayment.user_id == user_id,
+            DividendPayment.security_id == security.id,
+            DividendPayment.pay_date == doc.pay_date,
+            DividendPayment.shares == doc.shares,
+            DividendPayment.gross == doc.gross,
+        )
+    ):
+        raise DuplicateError("Ya hay un dividendo igual")
+    fx_rate, net_base = doc.fx_rate, doc.net_base
+    if fx_rate is None:  # el PDF no trae cambio: se usa el último conocido
+        rate = latest_fx(session).get(doc.currency)
+        if rate is None:
+            raise PortfolioError(
+                f"No hay tipo de cambio {doc.currency}→EUR para valorar el dividendo"
+            )
+        fx_rate = Decimal(str(rate))
+        net_base = (doc.net * fx_rate).quantize(Decimal("0.01"))
+    pay = DividendPayment(
+        user_id=user_id,
+        security_id=security.id,
+        ex_date=doc.ex_date,
+        pay_date=doc.pay_date,
+        shares=doc.shares,
+        per_share=doc.per_share,
+        currency=doc.currency,
+        gross=doc.gross,
+        withholding_origin=doc.withholding_origin,
+        withholding_domestic=doc.withholding_domestic,
+        withholding_rate=doc.withholding_rate,
+        fees=doc.fees,
+        fx_rate=fx_rate,
+        net_base=net_base,
+        source=source,
+        external_id=doc.external_id or None,
+    )
+    session.add(pay)
+    session.commit()
+    return pay
+
+
+@dataclass
+class DocResult:
+    filename: str
+    status: str  # ok | duplicate | unknown_isin | error
+    message: str
+    isin: str = ""
+    name: str = ""
+
+
+def record_pdf(session: Session, user_id: int, filename: str, data: bytes) -> DocResult:
+    """Lee un PDF de HeyTrade y lo guarda. Nunca lanza: devuelve el resultado para mostrarlo."""
+    try:
+        doc = heytrade.parse_pdf(data)
+    except heytrade.ParseError as exc:
+        return DocResult(filename, "error", str(exc))
+    security = find_security(session, doc.isin)
+    if security is None:
+        return DocResult(
+            filename,
+            "unknown_isin",
+            f"{doc.name or doc.isin}: no sé qué ticker de Yahoo le corresponde",
+            doc.isin,
+            doc.name,
+        )
+    try:
+        if isinstance(doc, heytrade.TradeDoc):
+            add_transaction(
+                session,
+                user_id,
+                security,
+                kind=doc.kind,
+                trade_date=doc.trade_date,
+                quantity=doc.quantity,
+                total_eur=doc.total_eur,
+                price=doc.price,
+                currency=doc.currency,
+                fx_rate=doc.fx_rate,
+                fees=doc.fees,
+                source="pdf",
+                external_id=doc.external_id,
+            )
+            what = "Compra" if doc.kind == "buy" else "Venta"
+            return DocResult(
+                filename, "ok", f"{what} de {doc.quantity:f} {security.symbol} guardada", doc.isin
+            )
+        add_dividend(session, user_id, security, doc, "pdf")
+        return DocResult(
+            filename,
+            "ok",
+            f"Dividendo de {security.symbol} ({doc.gross:f} {doc.currency}) guardado",
+            doc.isin,
+        )
+    except PortfolioError as exc:
+        session.rollback()
+        status = "duplicate" if isinstance(exc, DuplicateError) else "error"
+        return DocResult(filename, status, f"{security.symbol}: {exc}", doc.isin)
+
+
+def assign_isin(session: Session, isin: str, symbol: str) -> Security:
+    """Enlaza un ISIN con un ticker de Yahoo; si el valor no existe, lo da de alta."""
+    from app import universe
+
+    isin, symbol = isin.strip().upper(), symbol.strip().upper()
+    if not heytrade.ISIN_RE.match(isin) or not SYMBOL_RE.match(symbol):
+        raise PortfolioError("ISIN o ticker no válidos")
+    owner = session.scalar(select(Security).where(Security.isin == isin))
+    if owner and owner.symbol != symbol:
+        raise PortfolioError(f"El ISIN ya está asignado a {owner.symbol}")
+    security = session.scalar(select(Security).where(Security.symbol == symbol))
+    if security is None:
+        universe.upsert_universe(session, universe.MANUAL, [symbol])
+        security = session.scalar(select(Security).where(Security.symbol == symbol))
+    elif not security.active or universe.MANUAL not in (security.universes or []):
+        security.universes = [*(security.universes or []), universe.MANUAL]
+        security.active = True
+    security.isin = isin
+    session.commit()
+    return security
+
+
+def fetch_market_data(symbol: str) -> None:
+    """Descarga ficha, histórico y cotización de un valor recién dado de alta (tarea de fondo)."""
+    import logging
+
+    from app import jobs
+    from app.db import SessionLocal
+
+    try:
+        with SessionLocal() as session:
+            jobs.refresh_fx(session)
+            jobs.refresh_profiles(session, symbols=[symbol])
+            jobs.refresh_history(session, symbols=[symbol])
+            jobs.refresh_quotes(session, symbols=[symbol])
+            jobs.refresh_financials(session, symbols=[symbol])
+            jobs.recompute_valuations(session, symbols=[symbol])
+    except Exception:
+        logging.getLogger(__name__).exception("No se pudieron descargar datos de %s", symbol)
+
+
+def parse_positions(session: Session, text: str) -> tuple[list[tuple], list[str]]:
+    """Posiciones pegadas, una por línea: `ticker o ISIN; acciones; coste medio en EUR`.
+
+    Devuelve las filas válidas (valor, acciones, coste medio) y los errores por línea.
+    """
+    rows, errors = [], []
+    for n, line in enumerate(text.splitlines(), 1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        parts = [p.strip() for p in re.split(r"[;\t]|(?<=\S),(?=\s)|\s{2,}", line.strip()) if p]
+        if len(parts) == 1:
+            parts = line.split()
+        if len(parts) != 3:
+            errors.append(f"Línea {n}: se esperan 3 columnas (ticker, acciones, coste medio)")
+            continue
+        sec = find_security(session, parts[0])
+        if sec is None:
+            errors.append(
+                f"Línea {n}: «{parts[0]}» no está en el universo (ticker de Yahoo o ISIN)"
+            )
+            continue
+        try:
+            shares, avg = heytrade.parse_number(parts[1]), heytrade.parse_number(parts[2])
+        except heytrade.ParseError:
+            errors.append(f"Línea {n}: número no válido")
+            continue
+        if shares <= 0 or avg <= 0:
+            errors.append(f"Línea {n}: acciones y coste medio deben ser positivos")
+            continue
+        rows.append((sec, shares, avg))
+    return rows, errors
+
+
+# --- Posiciones ---------------------------------------------------------------------------
+
+
+@dataclass
+class LastDividend:
+    ex_date: date
+    amount: float  # por acción, en la divisa del valor
+    change: float | None  # variación frente al anterior
+
+
+@dataclass
+class Position:
+    security: Security
+    shares: Decimal = ZERO
+    cost_eur: Decimal = ZERO  # coste de las acciones que siguen en cartera
+    invested_eur: Decimal = ZERO  # total comprado
+    sold_eur: Decimal = ZERO  # total cobrado en ventas (neto de comisiones)
+    realized_eur: Decimal = ZERO
+    dividends_gross_eur: Decimal = ZERO
+    dividends_net_eur: Decimal = ZERO
+    price: float | None = None  # divisa del valor
+    previous_close: float | None = None
+    fx: float | None = None
+    annual_dividend_ps: float | None = None  # por acción, divisa del valor
+    last_dividend: LastDividend | None = None
+
+    @property
+    def is_open(self) -> bool:
+        return self.shares > 0
+
+    @property
+    def avg_cost_eur(self) -> float | None:
+        return float(self.cost_eur / self.shares) if self.shares > 0 else None
+
+    @property
+    def value_eur(self) -> float | None:
+        if self.price is None or self.fx is None:
+            return None
+        return float(self.shares) * self.price * self.fx
+
+    @property
+    def day_change_eur(self) -> float | None:
+        if self.price is None or self.previous_close is None or self.fx is None:
+            return None
+        return float(self.shares) * (self.price - self.previous_close) * self.fx
+
+    @property
+    def unrealized_eur(self) -> float | None:
+        value = self.value_eur
+        return None if value is None else value - float(self.cost_eur)
+
+    @property
+    def unrealized_pct(self) -> float | None:
+        u = self.unrealized_eur
+        return u / float(self.cost_eur) if u is not None and self.cost_eur > 0 else None
+
+    @property
+    def total_return_eur(self) -> float | None:
+        u = self.unrealized_eur
+        if u is None:
+            return None
+        return u + float(self.realized_eur + self.dividends_gross_eur)
+
+    @property
+    def total_return_pct(self) -> float | None:
+        t = self.total_return_eur
+        return t / float(self.invested_eur) if t is not None and self.invested_eur > 0 else None
+
+    @property
+    def annual_dividend_eur(self) -> float | None:
+        if self.annual_dividend_ps is None or self.fx is None or not self.is_open:
+            return None
+        return float(self.shares) * self.annual_dividend_ps * self.fx
+
+    @property
+    def current_yield(self) -> float | None:
+        if self.annual_dividend_ps is None or not self.price:
+            return None
+        return self.annual_dividend_ps / self.price
+
+    @property
+    def yoc(self) -> float | None:
+        """Dividendo anual (a cambio actual) sobre lo que costó la posición."""
+        annual = self.annual_dividend_eur
+        return annual / float(self.cost_eur) if annual is not None and self.cost_eur > 0 else None
+
+
+@dataclass
+class Summary:
+    value_eur: float = 0.0
+    cost_eur: float = 0.0
+    day_change_eur: float = 0.0
+    unrealized_eur: float = 0.0
+    realized_eur: float = 0.0
+    dividends_gross_eur: float = 0.0
+    dividends_net_eur: float = 0.0
+    total_return_eur: float = 0.0
+    invested_eur: float = 0.0
+    annual_dividend_eur: float = 0.0
+    missing_prices: list[str] = field(default_factory=list)
+
+    @property
+    def unrealized_pct(self) -> float | None:
+        return self.unrealized_eur / self.cost_eur if self.cost_eur else None
+
+    @property
+    def total_return_pct(self) -> float | None:
+        return self.total_return_eur / self.invested_eur if self.invested_eur else None
+
+    @property
+    def yield_now(self) -> float | None:
+        return self.annual_dividend_eur / self.value_eur if self.value_eur else None
+
+    @property
+    def yoc(self) -> float | None:
+        return self.annual_dividend_eur / self.cost_eur if self.cost_eur else None
+
+
+def _last_dividend(session: Session, security_id: int) -> LastDividend | None:
+    rows = session.execute(
+        select(DividendEvent.ex_date, DividendEvent.amount)
+        .where(DividendEvent.security_id == security_id)
+        .order_by(DividendEvent.ex_date.desc())
+        .limit(2)
+    ).all()
+    if not rows:
+        return None
+    change = rows[0][1] / rows[1][1] - 1 if len(rows) > 1 and rows[1][1] else None
+    return LastDividend(rows[0][0], rows[0][1], change)
+
+
+def positions(session: Session, user_id: int, include_closed: bool = False) -> list[Position]:
+    fx = latest_fx(session)
+    by_sec: dict[int, Position] = {}
+    txs = session.scalars(
+        select(Transaction)
+        .where(Transaction.user_id == user_id)
+        .order_by(Transaction.trade_date, Transaction.id)
+    )
+    for t in txs:
+        pos = by_sec.get(t.security_id)
+        if pos is None:
+            pos = by_sec[t.security_id] = Position(session.get(Security, t.security_id))
+        if t.kind == "buy":
+            pos.shares += t.quantity
+            pos.cost_eur += t.total_eur
+            pos.invested_eur += t.total_eur
+        else:
+            avg = pos.cost_eur / pos.shares if pos.shares else ZERO
+            removed = avg * t.quantity
+            pos.shares -= t.quantity
+            pos.cost_eur -= removed
+            pos.sold_eur += t.total_eur
+            pos.realized_eur += t.total_eur - removed
+    for pay in session.scalars(select(DividendPayment).where(DividendPayment.user_id == user_id)):
+        pos = by_sec.get(pay.security_id)
+        if pos is None:  # dividendo de un valor sin operaciones: se muestra igualmente
+            pos = by_sec[pay.security_id] = Position(session.get(Security, pay.security_id))
+        pos.dividends_gross_eur += pay.gross * pay.fx_rate
+        pos.dividends_net_eur += pay.net_base
+    out = []
+    for pos in by_sec.values():
+        if not pos.is_open and not include_closed:
+            continue
+        sec = pos.security
+        quote = session.get(Quote, sec.id)
+        val = session.get(Valuation, sec.id)
+        pos.price = quote.price if quote else None
+        pos.previous_close = quote.previous_close if quote else None
+        pos.fx = fx.get(sec.currency) if sec.currency else None
+        if val:
+            pos.annual_dividend_ps = val.dividend_forward or val.dividend_ttm
+        pos.last_dividend = _last_dividend(session, sec.id)
+        out.append(pos)
+    return sorted(out, key=lambda p: -(p.value_eur or 0))
+
+
+def summarize(rows: list[Position]) -> Summary:
+    s = Summary()
+    for p in rows:
+        s.realized_eur += float(p.realized_eur)
+        s.dividends_gross_eur += float(p.dividends_gross_eur)
+        s.dividends_net_eur += float(p.dividends_net_eur)
+        s.invested_eur += float(p.invested_eur)
+        if not p.is_open:
+            s.total_return_eur += float(p.realized_eur + p.dividends_gross_eur)
+            continue
+        if p.value_eur is None:
+            s.missing_prices.append(p.security.symbol)
+            continue
+        s.value_eur += p.value_eur
+        s.cost_eur += float(p.cost_eur)
+        s.day_change_eur += p.day_change_eur or 0.0
+        s.unrealized_eur += p.unrealized_eur or 0.0
+        s.annual_dividend_eur += p.annual_dividend_eur or 0.0
+        s.total_return_eur += p.total_return_eur or 0.0
+    return s
+
+
+def allocation(rows: list[Position], key) -> list[tuple[str, float]]:
+    """Valor en EUR por grupo (`key(posición)` -> etiqueta), de mayor a menor."""
+    totals: dict[str, float] = defaultdict(float)
+    for p in rows:
+        if p.value_eur:
+            totals[key(p) or "Sin clasificar"] += p.value_eur
+    return sorted(totals.items(), key=lambda kv: -kv[1])
+
+
+# --- Proyección de dividendos --------------------------------------------------------------
+
+
+@dataclass
+class Projection:
+    months: list[tuple[int, int, float]]  # (año, mes, EUR bruto)
+    total_eur: float
+    estimated: list[str]  # valores repartidos por igual por falta de calendario
+
+
+def project_dividends(session: Session, rows: list[Position]) -> Projection:
+    """Dividendos brutos de los próximos 12 meses.
+
+    Para cada valor se repite el calendario de los últimos 12 meses (mes de la fecha ex), con el
+    dividendo actual: acciones × importe de cada pago × (dividendo estimado ÷ dividendo 12 m).
+    Sin calendario, el dividendo anual se reparte por igual en los 12 meses.
+    """
+    now = today()
+    window = now - timedelta(days=365)
+    buckets = [0.0] * 12  # índice = meses desde el actual
+    estimated: list[str] = []
+    for p in rows:
+        if not p.is_open or p.fx is None or p.annual_dividend_ps is None:
+            continue
+        val = session.get(Valuation, p.security.id)
+        events = session.execute(
+            select(DividendEvent.ex_date, DividendEvent.amount).where(
+                DividendEvent.security_id == p.security.id, DividendEvent.ex_date > window
+            )
+        ).all()
+        ttm = sum(a for _, a in events)
+        if events and ttm > 0:
+            scale = p.annual_dividend_ps / ttm
+            if val and val.dividend_ttm and val.dividend_forward:
+                scale = val.dividend_forward / val.dividend_ttm
+            for ex_date, amount in events:
+                offset = (ex_date.year * 12 + ex_date.month) - (now.year * 12 + now.month)
+                offset %= 12
+                buckets[offset] += float(p.shares) * amount * scale * p.fx
+        else:
+            estimated.append(p.security.symbol)
+            for i in range(12):
+                buckets[i] += (p.annual_dividend_eur or 0.0) / 12
+    months = []
+    for i, amount in enumerate(buckets):
+        index = now.year * 12 + now.month - 1 + i
+        months.append((index // 12, index % 12 + 1, amount))
+    return Projection(months, sum(buckets), estimated)
+
+
+# --- Resumen fiscal ------------------------------------------------------------------------
+
+
+@dataclass
+class TaxRow:
+    payment: DividendPayment
+    security: Security
+    gross_eur: float
+    origin_eur: float
+    domestic_eur: float
+    fees_eur: float
+    net_eur: float
+
+
+@dataclass
+class TaxYear:
+    year: int
+    rows: list[TaxRow]
+    gross_eur: float = 0.0
+    origin_eur: float = 0.0
+    domestic_eur: float = 0.0
+    fees_eur: float = 0.0
+    net_eur: float = 0.0
+    by_country: dict[str, dict[str, float]] = field(default_factory=dict)
+
+
+def tax_summary(session: Session, user_id: int) -> list[TaxYear]:
+    """Dividendos cobrados por año (de pago) con bruto y retenciones en origen y destino, en EUR."""
+    years: dict[int, TaxYear] = {}
+    payments = session.execute(
+        select(DividendPayment, Security)
+        .join(Security, Security.id == DividendPayment.security_id)
+        .where(DividendPayment.user_id == user_id)
+        .order_by(DividendPayment.pay_date)
+    ).all()
+    for pay, sec in payments:
+        fx = float(pay.fx_rate)
+        row = TaxRow(
+            pay,
+            sec,
+            float(pay.gross) * fx,
+            float(pay.withholding_origin) * fx,
+            float(pay.withholding_domestic) * fx,
+            float(pay.fees) * fx,
+            float(pay.net_base),
+        )
+        y = years.setdefault(pay.pay_date.year, TaxYear(pay.pay_date.year, []))
+        y.rows.append(row)
+        y.gross_eur += row.gross_eur
+        y.origin_eur += row.origin_eur
+        y.domestic_eur += row.domestic_eur
+        y.fees_eur += row.fees_eur
+        y.net_eur += row.net_eur
+        c = y.by_country.setdefault(
+            sec.country or "Desconocido", {"gross": 0.0, "origin": 0.0, "domestic": 0.0}
+        )
+        c["gross"] += row.gross_eur
+        c["origin"] += row.origin_eur
+        c["domestic"] += row.domestic_eur
+    return sorted(years.values(), key=lambda y: -y.year)
+
+
+def position_for(session: Session, user_id: int, security_id: int) -> Position | None:
+    """Posición del usuario en un valor (para el bloque «Mi posición» de su ficha)."""
+    has = session.scalar(
+        select(func.count())
+        .select_from(Transaction)
+        .where(Transaction.user_id == user_id, Transaction.security_id == security_id)
+    ) or session.scalar(
+        select(func.count())
+        .select_from(DividendPayment)
+        .where(DividendPayment.user_id == user_id, DividendPayment.security_id == security_id)
+    )
+    if not has:
+        return None
+    return next(
+        (
+            p
+            for p in positions(session, user_id, include_closed=True)
+            if p.security.id == security_id
+        ),
+        None,
+    )

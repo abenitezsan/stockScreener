@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.db import SessionLocal
 from app.logging_setup import setup_logging
 from app.models import User
+from app.portfolio_web import router as portfolio_router
 from app.web import ROOT, LoginRequired, router
 
 
@@ -55,6 +56,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Stock Screener", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 app.include_router(router)
+app.include_router(portfolio_router)
 
 
 @app.exception_handler(LoginRequired)

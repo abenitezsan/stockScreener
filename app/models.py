@@ -269,56 +269,65 @@ class WatchlistItem(Base):
 
 
 # --- Cartera ---------------------------------------------------------------------
+# Importes en EUR salvo que se indique. La posición se calcula a partir de las operaciones
+# (app/portfolio.py); las posiciones importadas a mano son una compra con `source="import"`.
 
 
 class Transaction(Base):
-    """Operación de compra/venta. Las posiciones se calculan a partir de aquí."""
+    """Compra o venta de un usuario."""
 
     __tablename__ = "transactions"
     __table_args__ = (
         CheckConstraint("kind IN ('buy', 'sell')", name="kind"),
         CheckConstraint("quantity > 0", name="quantity_positive"),
-        Index(None, "security_id", "trade_date"),
+        UniqueConstraint("user_id", "external_id"),
+        Index(None, "user_id", "security_id", "trade_date"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     security_id: Mapped[int] = mapped_column(ForeignKey("securities.id", ondelete="RESTRICT"))
     kind: Mapped[str] = mapped_column(String(8))
     trade_date: Mapped[date] = mapped_column(Date)
     quantity: Mapped[Decimal] = mapped_column(Money)
-    price: Mapped[Decimal] = mapped_column(Money)
+    price: Mapped[Decimal | None] = mapped_column(Money)  # en la divisa de la operación
     currency: Mapped[str] = mapped_column(String(3))
-    # Tipo de cambio aplicado por el bróker (divisa de la operación -> EUR)
+    # Tipo de cambio aplicado por el bróker (1 unidad de `currency` = fx_rate EUR)
     fx_rate: Mapped[Decimal] = mapped_column(Numeric(20, 10), server_default="1")
-    fees: Mapped[Decimal] = mapped_column(Money, server_default="0")  # en divisa base
+    fees: Mapped[Decimal] = mapped_column(Money, server_default="0")  # comisiones, en EUR
+    # Compra: lo pagado incluyendo comisiones. Venta: lo cobrado ya descontadas las comisiones.
+    total_eur: Mapped[Decimal] = mapped_column(Money)
+    source: Mapped[str] = mapped_column(String(10), server_default="manual")  # manual|import|pdf
+    external_id: Mapped[str | None] = mapped_column(String(64))  # hash del PDF: evita duplicados
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class DividendPayment(Base):
-    """Dividendo cobrado (o previsto) por la cartera."""
+    """Dividendo cobrado por un usuario. Bruto y retenciones, en la divisa del dividendo."""
 
     __tablename__ = "dividend_payments"
     __table_args__ = (
-        CheckConstraint("status IN ('expected', 'received')", name="status"),
-        Index(None, "pay_date"),
+        UniqueConstraint("user_id", "external_id"),
+        Index(None, "user_id", "pay_date"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     security_id: Mapped[int] = mapped_column(ForeignKey("securities.id", ondelete="RESTRICT"))
-    dividend_event_id: Mapped[int | None] = mapped_column(
-        ForeignKey("dividend_events.id", ondelete="SET NULL"), unique=True
-    )
-    status: Mapped[str] = mapped_column(String(10), server_default="expected")
     ex_date: Mapped[date | None] = mapped_column(Date)
     pay_date: Mapped[date] = mapped_column(Date)
     shares: Mapped[Decimal] = mapped_column(Money)
+    per_share: Mapped[Decimal | None] = mapped_column(Money)
     currency: Mapped[str] = mapped_column(String(3))
-    # Importes bruto y retenciones en la divisa del dividendo
     gross: Mapped[Decimal] = mapped_column(Money)
     withholding_origin: Mapped[Decimal] = mapped_column(Money, server_default="0")
     withholding_domestic: Mapped[Decimal] = mapped_column(Money, server_default="0")
+    withholding_rate: Mapped[Decimal | None] = mapped_column(Numeric(8, 4))  # 0.19 = 19 %
+    fees: Mapped[Decimal] = mapped_column(Money, server_default="0")  # gastos e impuestos
     fx_rate: Mapped[Decimal] = mapped_column(Numeric(20, 10), server_default="1")
-    net_base: Mapped[Decimal | None] = mapped_column(Money)  # neto cobrado en EUR
+    net_base: Mapped[Decimal] = mapped_column(Money)  # neto abonado en EUR
+    source: Mapped[str] = mapped_column(String(10), server_default="manual")
+    external_id: Mapped[str | None] = mapped_column(String(64))
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

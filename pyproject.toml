@@ -19,6 +19,7 @@ dependencies = [
     "yfinance>=0.2.54",
     "pandas>=2.2",
     "lxml>=5.0",
+    "pypdf>=4.0",  # lectura de los PDFs de HeyTrade
     "curl_cffi>=0.7",  # también lo usa yfinance
 ]
 
