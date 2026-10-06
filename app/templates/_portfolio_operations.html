@@ -4,10 +4,10 @@
   <tbody>{% for t, sec in transactions %}<tr>
     <td>{{ t.trade_date.strftime('%d/%m/%Y') }}</td><td><a href="{{ ROOT }}/security/{{ sec.symbol }}">{{ sec.symbol }}</a></td>
     <td>{{ 'Compra' if t.kind == 'buy' else 'Venta' }}</td><td class="num">{{ t.quantity | fmt('qty') }}</td>
-    <td class="num">{{ t.price | fmt }} {{ t.currency }}</td><td class="num">{{ t.fx_rate | fmt('text') if t.currency != base_currency else '–' }}</td>
+    <td class="num">{{ t.price | fmt }} {{ t.currency }}</td><td class="num">{{ t.fx_rate | fmt('qty') if t.currency != base_currency else '–' }}</td>
     <td class="num">{{ t.fees | fmt('eur') }}</td><td class="num">{{ t.total_eur | fmt('eur') }}</td>
     <td>{{ {'manual': 'Manual', 'import': 'Importada', 'pdf': 'PDF'}.get(t.source, t.source) }}</td>
-    <td><form method="post" action="{{ ROOT }}/portfolio/transactions/{{ t.id }}/delete" onsubmit="return confirm('¿Borrar esta operación?')"><button class="link" type="submit">Borrar</button></form></td>
+    <td><form method="post" action="{{ ROOT }}/portfolio/transactions/{{ t.id }}/delete" onsubmit="return confirm('¿Borrar esta operación?')"><button class="danger" type="submit">Borrar</button></form></td>
   </tr>{% else %}<tr><td colspan="10">Sin operaciones.</td></tr>{% endfor %}</tbody>
 </table></div>
 <h4>Dividendos cobrados</h4>
@@ -18,6 +18,6 @@
     <td class="num">{{ d.shares | fmt('qty') }}</td><td class="num">{{ d.gross | fmt }} {{ d.currency }}</td>
     <td class="num">{{ (d.withholding_origin + d.withholding_domestic) | fmt }}</td><td class="num">{{ d.net_base | fmt('eur') }}</td>
     <td>{{ 'PDF' if d.source == 'pdf' else 'Manual' }}</td>
-    <td><form method="post" action="{{ ROOT }}/portfolio/dividends/{{ d.id }}/delete" onsubmit="return confirm('¿Borrar este dividendo?')"><button class="link" type="submit">Borrar</button></form></td>
+    <td><form method="post" action="{{ ROOT }}/portfolio/dividends/{{ d.id }}/delete" onsubmit="return confirm('¿Borrar este dividendo?')"><button class="danger" type="submit">Borrar</button></form></td>
   </tr>{% else %}<tr><td colspan="8">Sin dividendos.</td></tr>{% endfor %}</tbody>
 </table></div>

@@ -6,10 +6,12 @@
   <article><div class="label">Cobrado hasta hoy (bruto)</div><div class="value">{{ summary.dividends_gross_eur | fmt('eur') }}</div></article>
 </div>
 <h4>Proyección mensual</h4>
+<div class="bars">
 {% for year, month, amount in projection.months %}
   <div class="bar-row wide"><span class="bar-label">{{ ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][month - 1] }} {{ year }}</span>
     <span class="bar" style="--w: {{ (amount / mx * 100) | round(1) }}%"></span><span class="bar-val">{{ amount | fmt('eur') }}</span></div>
 {% endfor %}
+</div>
 <p class="muted"><small>Se repite el calendario de pagos de los últimos 12 meses (mes de la fecha ex-dividendo, así que el cobro llega algo después) con el dividendo estimado actual y tus acciones de hoy, a cambio actual y en bruto.
 {% if projection.estimated %} Sin calendario conocido, repartido por igual: {{ projection.estimated | join(', ') }}.{% endif %}</small></p>
 
