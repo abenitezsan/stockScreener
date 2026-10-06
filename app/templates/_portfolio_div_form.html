@@ -1,0 +1,14 @@
+<form method="post" action="{{ ROOT }}/portfolio/dividends" class="tx-form">
+  {% if sec_symbol %}<input type="hidden" name="ident" value="{{ sec_symbol }}"><input type="hidden" name="back" value="/security/{{ sec_symbol }}">
+  {% else %}<label>Ticker o ISIN<input type="text" name="ident" required maxlength="32"></label>{% endif %}
+  <label>Fecha de pago<input type="date" name="pay_date" value="{{ today.isoformat() }}" max="{{ today.isoformat() }}" required></label>
+  <label>Ex-dividendo (opcional)<input type="date" name="ex_date" max="{{ today.isoformat() }}"></label>
+  <label>Acciones<input type="text" inputmode="decimal" name="shares" required></label>
+  <label>Importe bruto<input type="text" inputmode="decimal" name="gross" required></label>
+  <label>Divisa<input type="text" name="currency" placeholder="{{ sec_currency or 'la del valor' }}" maxlength="3"></label>
+  <label>Cambio a €<input type="text" inputmode="decimal" name="fx_rate" placeholder="automático"></label>
+  <label>Retención origen<input type="text" inputmode="decimal" name="withholding_origin" value="0"></label>
+  <label>Retención destino<input type="text" inputmode="decimal" name="withholding_domestic" value="0"></label>
+  <label>Gastos<input type="text" inputmode="decimal" name="fees" value="0"></label>
+  <button type="submit">Guardar</button>
+</form>

@@ -20,4 +20,4 @@
 <table><thead><tr><th>Año</th><th class="num">Bruto</th><th class="num">Neto cobrado</th></tr></thead><tbody>
   {% for y in received %}<tr><td>{{ y.year }}</td><td class="num">{{ y.gross_eur | fmt('eur') }}</td><td class="num">{{ y.net_eur | fmt('eur') }}</td></tr>{% endfor %}
 </tbody></table>
-{% else %}<p class="muted">Aún no hay dividendos cobrados. Sube los PDFs «Confirmación del abono» de HeyTrade.</p>{% endif %}
+{% else %}<p class="muted">Aún no hay dividendos cobrados. Sube los PDFs «Confirmación del abono» de HeyTrade o añádelos a mano en «Añadir e importar».</p>{% endif %}

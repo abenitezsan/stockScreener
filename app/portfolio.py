@@ -193,6 +193,73 @@ def add_dividend(
     return pay
 
 
+def add_manual_dividend(
+    session: Session,
+    user_id: int,
+    security: Security,
+    *,
+    pay_date: date,
+    shares: Decimal,
+    gross: Decimal,
+    currency: str,
+    fx_rate: Decimal,
+    ex_date: date | None = None,
+    withholding_origin: Decimal = ZERO,
+    withholding_domestic: Decimal = ZERO,
+    fees: Decimal = ZERO,
+    net: Decimal | None = None,
+    notes: str | None = None,
+) -> DividendPayment:
+    """Alta a mano de un dividendo cobrado (por si falla la importación del PDF).
+
+    Importes en la divisa del dividendo; el neto en EUR se calcula con el cambio indicado.
+    Si no se da el neto, es bruto menos retenciones y gastos.
+    """
+    if shares <= 0 or gross <= 0:
+        raise PortfolioError("Acciones e importe bruto deben ser positivos")
+    if min(withholding_origin, withholding_domestic, fees) < 0 or fx_rate <= 0:
+        raise PortfolioError("Retenciones, gastos y tipo de cambio no pueden ser negativos")
+    if pay_date > today():
+        raise PortfolioError("La fecha de pago no puede ser futura")
+    if ex_date and ex_date > pay_date:
+        raise PortfolioError("La fecha ex-dividendo es posterior al pago")
+    withheld = withholding_origin + withholding_domestic + fees
+    net = gross - withheld if net is None else net
+    if net < 0 or withheld > gross:
+        raise PortfolioError("Las retenciones y gastos superan el bruto")
+    if session.scalar(
+        select(DividendPayment.id).where(
+            DividendPayment.user_id == user_id,
+            DividendPayment.security_id == security.id,
+            DividendPayment.pay_date == pay_date,
+            DividendPayment.shares == shares,
+            DividendPayment.gross == gross,
+        )
+    ):
+        raise DuplicateError("Ya hay un dividendo igual")
+    pay = DividendPayment(
+        user_id=user_id,
+        security_id=security.id,
+        ex_date=ex_date,
+        pay_date=pay_date,
+        shares=shares,
+        per_share=(gross / shares).quantize(Decimal("0.00000001")),
+        currency=currency,
+        gross=gross,
+        withholding_origin=withholding_origin,
+        withholding_domestic=withholding_domestic,
+        withholding_rate=(withheld / gross).quantize(Decimal("0.0001")) if withheld else None,
+        fees=fees,
+        fx_rate=fx_rate,
+        net_base=(net * fx_rate).quantize(Decimal("0.01")),
+        source="manual",
+        notes=(notes or None),
+    )
+    session.add(pay)
+    session.commit()
+    return pay
+
+
 @dataclass
 class DocResult:
     filename: str

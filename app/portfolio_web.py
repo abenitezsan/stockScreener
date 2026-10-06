@@ -108,9 +108,12 @@ def portfolio_page(
     tab: str = "posiciones",
     done: str = "",
 ):
-    notice = {"op": "Operación guardada.", "deleted": "Eliminado.", "isin": "ISIN asignado."}.get(
-        done, ""
-    )
+    notice = {
+        "op": "Operación guardada.",
+        "div": "Dividendo guardado.",
+        "deleted": "Eliminado.",
+        "isin": "ISIN asignado.",
+    }.get(done, "")
     return _page(request, session, user, tab, notice=notice)
 
 
@@ -263,6 +266,67 @@ def add_manual_transaction(
     target = _back(back)
     sep = "&" if "?" in target else "?"
     return RedirectResponse(f"{ROOT}{target}{sep}done=op", status_code=303)
+
+
+@router.post("/portfolio/dividends", response_class=HTMLResponse)
+def add_manual_dividend(
+    request: Request,
+    session: DbSession,
+    user: PortfolioUser,
+    ident: str = Form(...),
+    pay_date: str = Form(...),
+    ex_date: str = Form(""),
+    shares: str = Form(...),
+    gross: str = Form(...),
+    currency: str = Form(""),
+    fx_rate: str = Form(""),
+    withholding_origin: str = Form("0"),
+    withholding_domestic: str = Form("0"),
+    fees: str = Form("0"),
+    back: str = Form(""),
+):
+    try:
+        sec = portfolio.find_security(session, ident)
+        if sec is None:
+            raise portfolio.PortfolioError(f"«{ident.strip()}» no está en el universo")
+        try:
+            pay = date.fromisoformat(pay_date)
+            ex = date.fromisoformat(ex_date) if ex_date.strip() else None
+        except ValueError:
+            raise portfolio.PortfolioError("Fecha no válida") from None
+        cur = (currency or sec.currency or get_settings().base_currency).strip().upper()
+        base = get_settings().base_currency
+        if cur == base:
+            fx = Decimal(1)
+        elif fx_rate.strip():
+            fx = _number(fx_rate, "Tipo de cambio")
+        else:
+            rate = latest_fx(session).get(cur)
+            if rate is None:
+                raise portfolio.PortfolioError(f"Indica el tipo de cambio {cur}→{base}")
+            fx = Decimal(str(rate))
+        portfolio.add_manual_dividend(
+            session,
+            user.id,
+            sec,
+            pay_date=pay,
+            ex_date=ex,
+            shares=_number(shares, "Acciones"),
+            gross=_number(gross, "Importe bruto"),
+            currency=cur,
+            fx_rate=fx,
+            withholding_origin=_number(withholding_origin or "0", "Retención en origen"),
+            withholding_domestic=_number(withholding_domestic or "0", "Retención en destino"),
+            fees=_number(fees or "0", "Gastos"),
+        )
+    except (portfolio.PortfolioError, InvalidOperation) as exc:
+        session.rollback()
+        return _page(request, session, user, "importar", errors=[str(exc)], status=400)
+    target = _back(back)
+    if target == "/portfolio?tab=operaciones":
+        target = "/portfolio?tab=dividendos"
+    sep = "&" if "?" in target else "?"
+    return RedirectResponse(f"{ROOT}{target}{sep}done=div", status_code=303)
 
 
 def _delete(session, user, model, row_id: int):

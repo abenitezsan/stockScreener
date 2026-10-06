@@ -295,3 +295,35 @@ def test_delete_guards(client):
     other = _user(client, "ajeno@example.com")
     assert client.post(f"/portfolio/transactions/{buy_id}/delete").status_code == 404
     assert other.id != uid
+
+
+def test_manual_dividend(client):
+    user = _user(client, "mdiv@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50", "as_of": "2026-01-02"})
+    data = {
+        "ident": "AAA",
+        "pay_date": "2026-03-01",
+        "shares": "10",
+        "gross": "12,50",
+        "withholding_origin": "1,50",
+        "fx_rate": "",
+    }
+    r = client.post("/portfolio/dividends", data=data, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].endswith("tab=dividendos&done=div")
+    dup = client.post("/portfolio/dividends", data=data)
+    assert dup.status_code == 400 and "Ya hay un dividendo igual" in dup.text
+    bad = client.post("/portfolio/dividends", data={**data, "gross": "x", "pay_date": "2026-03-02"})
+    assert bad.status_code == 400
+    over = client.post(
+        "/portfolio/dividends", data={**data, "withholding_origin": "99", "pay_date": "2026-03-03"}
+    )
+    assert over.status_code == 400 and "superan el bruto" in over.text
+    unknown = client.post("/portfolio/dividends", data={**data, "ident": "NOPE"})
+    assert unknown.status_code == 400 and "no está en el universo" in unknown.text
+    with _db() as s:
+        pos = portfolio.position_for(s, user.id, _sec(s, "AAA").id)
+        assert pos.dividends_net_eur > 0
+        assert pos.dividends_net_eur < pos.dividends_gross_eur
+    assert "AAA" in client.get("/portfolio?tab=operaciones").text
+    assert client.get("/portfolio?tab=importar").status_code == 200
+    assert "Añadir dividendo cobrado" in client.get("/security/AAA").text
