@@ -1,8 +1,8 @@
 """Rutas de la cartera: resumen, dividendos, resumen fiscal, operaciones e importación."""
 
 from datetime import date
-from typing import Annotated
 from decimal import Decimal, InvalidOperation
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
