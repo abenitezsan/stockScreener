@@ -1,6 +1,7 @@
 """Rutas de la cartera: resumen, dividendos, resumen fiscal, operaciones e importación."""
 
 from datetime import date
+from typing import Annotated
 from decimal import Decimal, InvalidOperation
 
 from fastapi import (
@@ -118,9 +119,9 @@ async def upload_pdfs(
     request: Request,
     session: DbSession,
     user: PortfolioUser,
-    files: list[UploadFile] = File(default=[]),
+    files: Annotated[list[UploadFile] | None, File()] = None,
 ):
-    files = [f for f in files if f.filename]
+    files = [f for f in files or [] if f.filename]
     if not files:
         return _page(
             request, session, user, "importar", errors=["Elige al menos un PDF"], status=400
