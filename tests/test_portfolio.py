@@ -327,3 +327,15 @@ def test_manual_dividend(client):
     assert "AAA" in client.get("/portfolio?tab=operaciones").text
     assert client.get("/portfolio?tab=importar").status_code == 200
     assert "Añadir dividendo cobrado" in client.get("/security/AAA").text
+    page = client.get("/portfolio?tab=posiciones").text
+    assert "Añadir dividendo cobrado de AAA" in page and 'value="/portfolio?tab=posiciones"' in page
+    data = {
+        "ident": "AAA",
+        "pay_date": "2026-04-01",
+        "shares": "10",
+        "back": "/portfolio?tab=posiciones",
+    }
+    ok = client.post("/portfolio/dividends", data={**data, "gross": "5"}, follow_redirects=False)
+    assert ok.status_code == 303 and "tab=posiciones" in ok.headers["location"]
+    bad = client.post("/portfolio/dividends", data={**data, "gross": "x"})
+    assert bad.status_code == 400 and "Posiciones" in bad.text and "no es un número" in bad.text

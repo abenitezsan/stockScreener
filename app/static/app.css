@@ -327,3 +327,6 @@ form.stack button, .tx-form button { width: auto; margin: 0; }
 
 .subtabs a { cursor: pointer; }
 .subtabs a:focus-visible, table button.danger:focus-visible { outline: 2px solid var(--pico-primary); outline-offset: 2px; }
+
+.positions tr.row-extra td { padding-top: 0; border-top: 0; }
+.positions tr.row-extra details { margin: 0 0 0.4rem; }

@@ -41,6 +41,11 @@
         {% elif ld.change is not none and ld.change < -0.0005 %}<span class="neg" title="Baja {{ (-ld.change) | fmt('pct') }}">▼ {{ (-ld.change) | fmt('pct') }}</span>
         {% elif ld.change is not none %}<span class="muted">=</span>{% endif %}{% else %}–{% endif %}</td>
     </tr>
+    <tr class="row-extra"><td colspan="11">
+      <details><summary><small>Añadir dividendo cobrado de {{ sec.symbol }}</small></summary>
+        {% with sec_symbol=sec.symbol, sec_currency=sec.currency, back_to='/portfolio?tab=posiciones' %}{% include "_portfolio_div_form.html" %}{% endwith %}
+      </details>
+    </td></tr>
   {% endfor %}
   </tbody>
 </table>

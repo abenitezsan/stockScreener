@@ -321,7 +321,8 @@ def add_manual_dividend(
         )
     except (portfolio.PortfolioError, InvalidOperation) as exc:
         session.rollback()
-        return _page(request, session, user, "importar", errors=[str(exc)], status=400)
+        tab = "posiciones" if _back(back).startswith("/portfolio?tab=posiciones") else "importar"
+        return _page(request, session, user, tab, errors=[str(exc)], status=400)
     target = _back(back)
     if target == "/portfolio?tab=operaciones":
         target = "/portfolio?tab=dividendos"
