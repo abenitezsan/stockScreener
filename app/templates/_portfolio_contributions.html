@@ -5,7 +5,7 @@
   {{ card('Valor vs aportado', gain_vs_invested | fmt('seur'), gain_vs_invested | gain, gain_vs_invested_pct | fmt('spct')) }}
   {{ card('DCA mensual', (dca.amount | fmt('eur')) if dca and dca.active else '–', '', ('día ' ~ dca.day) if dca and dca.active else ('en pausa' if dca else '')) }}
 </div>
-<p class="muted"><small>Lo aportado lo introduces tú: no depende de las operaciones ni cambia al eliminar una posición. Importes en {{ base_currency }}.</small></p>
+<p class="muted"><small>Lo aportado lo introduces tú y solo cambia con aportaciones, DCA y ajustes: las compras y ventas (incluso futuras) se consideran reinversión de dividendos o de ganancias y nunca lo tocan, ni tampoco eliminar una posición. Importes en {{ base_currency }}.</small></p>
 
 {% if chart %}
 <h4>Aportado vs valor</h4>

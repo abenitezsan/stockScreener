@@ -479,6 +479,10 @@ def apply_dca(session: Session, user_id: int, upto: date | None = None) -> int:
 
 
 def invested_total(session: Session, user_id: int, upto: date | None = None) -> Decimal:
+    """Dinero aportado: solo suman las aportaciones; compras, ventas y dividendos nunca lo tocan.
+
+    Las compras posteriores se entienden financiadas con dividendos o ventas, no con dinero nuevo.
+    """
     query = select(func.coalesce(func.sum(Contribution.amount), 0)).where(
         Contribution.user_id == user_id
     )

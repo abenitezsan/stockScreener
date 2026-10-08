@@ -436,3 +436,50 @@ def test_history_delete_position_and_contributions(client):
             select(DividendPayment).where(DividendPayment.user_id == user.id)
         ).all()
     assert client.post("/portfolio/securities/999999/delete").status_code == 404
+
+
+def test_trades_never_change_contributed_money(client):
+    """Compras, ventas, dividendos y borrar posiciones no tocan lo aportado: solo las aportaciones."""
+    from sqlalchemy import select
+
+    from app import auth
+    from app.config import today
+    from app.models import Contribution
+
+    auth._failures.clear()
+    user = _user(client, "regla@example.com")
+    client.post(
+        "/portfolio/contributions",
+        data={"kind": "initial", "day": "2026-01-02", "amount": "1000"},
+    )
+
+    def state():
+        with _db() as s:
+            rows = s.scalars(select(Contribution).where(Contribution.user_id == user.id)).all()
+            snap = portfolio.take_snapshot(s, user.id)
+            return portfolio.invested_total(s, user.id, today()), len(rows), snap.invested
+
+    assert state() == (D("1000"), 1, D("1000"))
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50", "as_of": "2026-01-02"})
+    buy = {
+        "ident": "AAA",
+        "kind": "buy",
+        "trade_date": "2026-02-01",
+        "quantity": "5",
+        "price": "20",
+    }
+    client.post("/portfolio/transactions", data=buy)
+    client.post("/portfolio/transactions", data={**buy, "kind": "sell", "trade_date": "2026-03-01"})
+    client.post(
+        "/portfolio/dividends",
+        data={"ident": "AAA", "pay_date": "2026-03-02", "shares": "10", "gross": "30"},
+    )
+    assert state() == (D("1000"), 1, D("1000"))
+    with _db() as s:
+        sid = _sec(s, "AAA").id
+    client.post(f"/portfolio/securities/{sid}/delete")
+    assert state() == (D("1000"), 1, D("1000"))
+    client.post(
+        "/portfolio/contributions", data={"kind": "adjust", "day": "2026-04-01", "amount": "-250"}
+    )
+    assert state()[0] == D("750")
