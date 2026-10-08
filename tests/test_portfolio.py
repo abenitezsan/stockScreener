@@ -483,3 +483,34 @@ def test_trades_never_change_contributed_money(client):
         "/portfolio/contributions", data={"kind": "adjust", "day": "2026-04-01", "amount": "-250"}
     )
     assert state()[0] == D("750")
+
+
+def test_dividend_calendar_navigation(client):
+    from app import auth
+    from app.config import today
+
+    auth._failures.clear()
+    user = _user(client, "calendario@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50", "as_of": "2024-01-02"})
+    client.post(
+        "/portfolio/dividends/history",
+        data={
+            "ident": "AAA",
+            "currency": "EUR",
+            "back": "/portfolio?tab=posiciones",
+            "text": "15/03/2025; 10; 20\n15/06/2025; 10; 30\n15/03/2026; 10; 40",
+        },
+    )
+    page = client.get("/portfolio?tab=dividendos").text
+    assert "Media mensual cobrada" in page and "Dividendos por mes" in page
+    assert "12 meses antes" in page and 'class="evolution div-chart"' in page
+    old = client.get("/portfolio?tab=dividendos&start=2025-01")
+    assert old.status_code == 200 and "ene 2025 – dic 2025" in old.text and "cobrado 20" in old.text
+    assert client.get("/portfolio?tab=dividendos&start=basura").status_code == 200
+    assert client.get("/portfolio?tab=dividendos&start=1999-01").status_code == 200
+    assert client.get("/portfolio?tab=dividendos&start=2999-01").status_code == 200
+    with _db() as s:
+        pos = portfolio.positions(s, user.id)
+        cal = portfolio.dividend_calendar(s, user.id, portfolio.project_dividends(s, pos))
+        assert len(cal.months) == 12 and cal.months[0].month == today().month
+        assert cal.avg_months == 12 and 0 <= cal.avg_received_gross <= 90 / 12

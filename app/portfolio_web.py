@@ -85,6 +85,27 @@ def _chart(snaps) -> dict | None:
     }
 
 
+def _div_chart(cal) -> list[dict]:
+    """Columnas SVG (viewBox 600x200) de la ventana: cobrado (macizo) y pendiente (claro)."""
+    top = max((m.total for m in cal.months), default=0.0) or 1.0
+    plot = 150.0  # alto útil
+    out = []
+    for i, m in enumerate(cal.months):
+        got, pend = m.received_gross / top * plot, m.pending / top * plot
+        out.append(
+            {
+                "x": 8 + i * 49,
+                "got_h": got,
+                "got_y": 170 - got,
+                "pend_h": pend,
+                "pend_y": 170 - got - pend,
+                "label_y": 170 - got - pend - 4,
+                "m": m,
+            }
+        )
+    return out
+
+
 def _page(
     request: Request,
     session,
@@ -95,6 +116,7 @@ def _page(
     errors: list[str] | None = None,
     notice: str = "",
     status: int = 200,
+    start: str = "",
 ):
     tab = tab if tab in TABS else "posiciones"
     rows = portfolio.positions(session, user.id, include_closed=tab == "posiciones")
@@ -136,6 +158,10 @@ def _page(
     if tab == "dividendos":
         ctx["projection"] = portfolio.project_dividends(session, open_rows)
         ctx["received"] = [y for y in portfolio.tax_summary(session, user.id)]
+        ctx["calendar"] = cal = portfolio.dividend_calendar(
+            session, user.id, ctx["projection"], start
+        )
+        ctx["div_chart"] = _div_chart(cal)
     if tab == "fiscal":
         ctx["years"] = portfolio.tax_summary(session, user.id)
     if tab == "operaciones":
@@ -161,6 +187,7 @@ def portfolio_page(
     user: PortfolioUser,
     tab: str = "posiciones",
     done: str = "",
+    start: str = "",
 ):
     notice = {
         "op": "Operación guardada.",
@@ -168,7 +195,7 @@ def portfolio_page(
         "deleted": "Eliminado.",
         "isin": "ISIN asignado.",
     }.get(done, "")
-    return _page(request, session, user, tab, notice=notice)
+    return _page(request, session, user, tab, notice=notice, start=start)
 
 
 @router.post("/portfolio/upload", response_class=HTMLResponse)

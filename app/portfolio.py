@@ -919,6 +919,84 @@ def project_dividends(session: Session, rows: list[Position]) -> Projection:
     return Projection(months, sum(buckets), estimated)
 
 
+@dataclass
+class CalendarMonth:
+    year: int
+    month: int
+    received_gross: float = 0.0
+    received_net: float = 0.0
+    pending: float = 0.0  # esperado y aún sin cobrar (mes actual y siguientes), bruto
+    future: bool = False  # el mes actual o posterior
+
+    @property
+    def total(self) -> float:
+        return self.received_gross + self.pending
+
+
+@dataclass
+class DividendCalendar:
+    months: list[CalendarMonth]
+    start: str  # «AAAA-MM» del primer mes de la ventana
+    prev_start: str | None  # ventana anterior (12 meses atrás), None si no hay datos más antiguos
+    next_start: str | None  # ventana siguiente, None si ya se ve la de los próximos 12 meses
+    is_current: bool  # la ventana empieza en el mes actual
+    avg_received_gross: float  # media mensual cobrada en los últimos meses completos
+    avg_received_net: float
+    avg_months: int  # meses sobre los que se calcula esa media
+    window_received_gross: float
+    window_expected_gross: float  # cobrado + pendiente en la ventana
+
+
+def _ym(index: int) -> str:
+    return f"{index // 12}-{index % 12 + 1:02d}"
+
+
+def dividend_calendar(
+    session: Session, user_id: int, projection: Projection, start: str = ""
+) -> DividendCalendar:
+    """Dividendos por mes de una ventana de 12 meses: cobrados (por fecha de pago) y esperados.
+
+    Por defecto la ventana son los próximos 12 meses (desde el actual); `start` («AAAA-MM») la
+    mueve a periodos anteriores. Los meses pasados solo llevan lo cobrado; el actual y los
+    siguientes, lo cobrado más lo esperado que falta (proyección, ver `project_dividends`).
+    """
+    now = today()
+    now_idx = now.year * 12 + now.month - 1
+    received: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0])
+    for pay in session.scalars(select(DividendPayment).where(DividendPayment.user_id == user_id)):
+        bucket = received[pay.pay_date.year * 12 + pay.pay_date.month - 1]
+        bucket[0] += float(pay.gross * pay.fx_rate)
+        bucket[1] += float(pay.net_base)
+    first_idx = min(received, default=now_idx)
+    try:
+        year, month = (int(x) for x in start.split("-"))
+        start_idx = year * 12 + month - 1
+    except ValueError:
+        start_idx = now_idx
+    start_idx = max(min(start_idx, now_idx), first_idx - 11)
+    expected = {now_idx + i: amount for i, (_, _, amount) in enumerate(projection.months)}
+    months = []
+    for idx in range(start_idx, start_idx + 12):
+        gross, net = received.get(idx, (0.0, 0.0))
+        future = idx >= now_idx
+        pending = max(expected.get(idx, 0.0) - gross, 0.0) if future else 0.0
+        months.append(CalendarMonth(idx // 12, idx % 12 + 1, gross, net, pending, future))
+    n = min(12, max(now_idx - first_idx, 0))  # meses completos con historia, máximo 12
+    done = [received.get(i, (0.0, 0.0)) for i in range(now_idx - n, now_idx)]
+    return DividendCalendar(
+        months=months,
+        start=_ym(start_idx),
+        prev_start=_ym(start_idx - 12) if start_idx - 12 >= first_idx - 11 else None,
+        next_start=_ym(min(start_idx + 12, now_idx)) if start_idx < now_idx else None,
+        is_current=start_idx == now_idx,
+        avg_received_gross=sum(g for g, _ in done) / n if n else 0.0,
+        avg_received_net=sum(x for _, x in done) / n if n else 0.0,
+        avg_months=n,
+        window_received_gross=sum(m.received_gross for m in months),
+        window_expected_gross=sum(m.total for m in months),
+    )
+
+
 # --- Resumen fiscal ------------------------------------------------------------------------
 
 
