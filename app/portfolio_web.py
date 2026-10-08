@@ -131,6 +131,37 @@ def _fail(request, session, user, back, errors, default_tab="importar"):
     return _page(request, session, user, tab, errors=errors, status=400)
 
 
+# Columnas de la tabla de Posiciones por las que se puede ordenar: clave -> (título, valor)
+POSITION_SORTS = {
+    "symbol": ("Valor", lambda p: p.security.symbol),
+    "shares": ("Acciones", lambda p: p.shares),
+    "avg_cost": ("Coste medio", lambda p: p.avg_cost_eur),
+    "price": ("Precio", lambda p: p.price),
+    "value": ("Valor €", lambda p: p.value_eur),
+    "unrealized": ("Revalorización", lambda p: p.unrealized_eur),
+    "total_return": ("Total return", lambda p: p.total_return_eur),
+    "dividend": ("Dividendo anual", lambda p: p.annual_dividend_eur),
+    "yield": ("Yield", lambda p: p.current_yield),
+    "yoc": ("YOC", lambda p: p.yoc),
+    "last_dividend": (
+        "Último dividendo",
+        lambda p: p.last_dividend.ex_date if p.last_dividend else None,
+    ),
+}
+TEXT_SORTS = {"symbol"}  # se ordenan A→Z por defecto; el resto, de mayor a menor
+
+
+def sort_positions(rows: list, key: str, direction: str) -> list:
+    """Ordena por la columna elegida; los valores sin dato van siempre al final."""
+    if key not in POSITION_SORTS:
+        return rows
+    getter = POSITION_SORTS[key][1]
+    with_value = [(getter(p), p) for p in rows if getter(p) is not None]
+    without = [p for p in rows if getter(p) is None]
+    with_value.sort(key=lambda item: item[0], reverse=direction == "desc")
+    return [p for _, p in with_value] + without
+
+
 def _page(
     request: Request,
     session,
@@ -142,6 +173,8 @@ def _page(
     notice: str = "",
     status: int = 200,
     start: str = "",
+    sort: str = "",
+    direction: str = "",
 ):
     tab = tab if tab in TABS else "posiciones"
     rows = portfolio.positions(session, user.id, include_closed=tab == "posiciones")
@@ -177,6 +210,14 @@ def _page(
         )
         ctx["chart"] = _chart(portfolio.snapshot_series(session, user.id))
     if tab == "posiciones":
+        sort_key = sort if sort in POSITION_SORTS else "value"
+        direction = (
+            direction
+            if direction in ("asc", "desc")
+            else ("asc" if sort_key in TEXT_SORTS else "desc")
+        )
+        ctx["rows"] = sort_positions(open_rows, sort_key, direction)
+        ctx["sort_key"], ctx["sort_dir"], ctx["sort_cols"] = sort_key, direction, POSITION_SORTS
         ctx["by_sector"] = portfolio.allocation(open_rows, lambda p: p.security.sector)
         ctx["by_country"] = portfolio.allocation(open_rows, lambda p: p.security.country)
         ctx["by_currency"] = portfolio.allocation(open_rows, lambda p: p.security.currency)
@@ -225,6 +266,8 @@ def portfolio_page(
     tab: str = "posiciones",
     done: str = "",
     start: str = "",
+    sort: str = "",
+    dir: str = "",
 ):
     notice = {
         "op": "Operación guardada.",
@@ -235,7 +278,7 @@ def portfolio_page(
         "deleted": "Eliminado.",
         "isin": "ISIN asignado.",
     }.get(done, "")
-    return _page(request, session, user, tab, notice=notice, start=start)
+    return _page(request, session, user, tab, notice=notice, start=start, sort=sort, direction=dir)
 
 
 @router.post("/portfolio/upload", response_class=HTMLResponse)

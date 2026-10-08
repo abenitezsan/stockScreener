@@ -21,9 +21,11 @@
 <div class="scroll-x">
 <table class="striped positions">
   <thead><tr>
-    <th>Valor</th><th class="num">Acciones</th><th class="num">Coste medio</th><th class="num">Precio</th>
-    <th class="num">Valor €</th><th class="num">Revalorización</th><th class="num">Total return</th>
-    <th class="num">Dividendo anual</th><th class="num">Yield</th><th class="num">YOC</th><th>Último dividendo</th>
+    {% macro sorth(key, cls='') %}{% set on = sort_key == key %}{% set nxt = ('asc' if sort_dir == 'desc' else 'desc') if on else ('asc' if key == 'symbol' else 'desc') %}
+    <th class="{{ cls }}"{% if on %} aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}><a class="sort" href="{{ ROOT }}/portfolio?tab=posiciones&sort={{ key }}&dir={{ nxt }}" title="Ordenar por {{ sort_cols[key][0] }}">{{ sort_cols[key][0] }}{% if on %} {{ '▲' if sort_dir == 'asc' else '▼' }}{% endif %}</a></th>{% endmacro %}
+    {{ sorth('symbol') }}{{ sorth('shares', 'num') }}{{ sorth('avg_cost', 'num') }}{{ sorth('price', 'num') }}
+    {{ sorth('value', 'num') }}{{ sorth('unrealized', 'num') }}{{ sorth('total_return', 'num') }}
+    {{ sorth('dividend', 'num') }}{{ sorth('yield', 'num') }}{{ sorth('yoc', 'num') }}{{ sorth('last_dividend') }}
   </tr></thead>
   <tbody>
   {% for p in rows %}{% set sec = p.security %}{% set ld = p.last_dividend %}
@@ -47,7 +49,7 @@
   </tbody>
 </table>
 </div>
-<p class="muted"><small>Pulsa un valor para ver su detalle y gestionar su posición (añadir dividendos, cargar histórico, eliminarla). Último dividendo: fecha ex-dividendo e importe por acción en la divisa del valor, con la variación frente al anterior (Yahoo no da la fecha de anuncio). YOC = dividendo anual a cambio actual ÷ coste de la posición.</small></p>
+<p class="muted"><small>Pulsa el encabezado de una columna para ordenar (otra vez, para invertir). Pulsa un valor para ver su detalle y gestionar su posición (añadir dividendos, cargar histórico, eliminarla). Último dividendo: fecha ex-dividendo e importe por acción en la divisa del valor, con la variación frente al anterior (Yahoo no da la fecha de anuncio). YOC = dividendo anual a cambio actual ÷ coste de la posición.</small></p>
 
 <div class="charts">
   {% for title, data in [('Por sector', by_sector), ('Por país', by_country), ('Por divisa', by_currency)] %}
