@@ -680,3 +680,50 @@ def test_edit_average_price(client):
     client.post(f"/portfolio/cost-adjustments/{adj_id}/delete")
     with _db() as s:
         assert portfolio.position_for(s, user.id, sid).avg_cost_eur == pytest.approx(50)
+
+
+def test_sort_positions_by_any_column(client):
+    from app import auth
+    from app.portfolio_web import POSITION_SORTS, sort_positions
+
+    auth._failures.clear()
+    _user(client, "ordenar@example.com")
+    client.post(
+        "/portfolio/positions",
+        data={"text": "AAA; 10; 50\nBBB.MC; 20; 18", "as_of": "2026-01-02"},
+    )
+    page = client.get("/portfolio?tab=posiciones").text
+    for key, (title, _) in POSITION_SORTS.items():
+        assert f"sort={key}&dir=" in page and f'title="Ordenar por {title}"' in page
+    for key in POSITION_SORTS:
+        for direction in ("asc", "desc"):
+            r = client.get(f"/portfolio?tab=posiciones&sort={key}&dir={direction}")
+            assert r.status_code == 200
+
+    # el orden se aplica de verdad: por valor, ticker y acciones, en los dos sentidos
+    def tickers(query):
+        html = client.get(f"/portfolio?tab=posiciones&{query}").text
+        body = html[html.index("<tbody>") :]
+        return [t for t in ("AAA", "BBB.MC") if f"/security/{t}" in body], body.index(
+            "/security/AAA"
+        ) < body.index("/security/BBB.MC")
+
+    assert tickers("sort=symbol&dir=asc")[1] and not tickers("sort=symbol&dir=desc")[1]
+    assert tickers("sort=shares&dir=asc")[1] and not tickers("sort=shares&dir=desc")[1]  # 10 < 20
+    # la cabecera activa indica el sentido y alterna al pulsarla
+    active = client.get("/portfolio?tab=posiciones&sort=shares&dir=asc").text
+    assert 'aria-sort="ascending"' in active and "sort=shares&dir=desc" in active
+    # valores sin dato siempre al final; parámetros raros no rompen
+    assert client.get("/portfolio?tab=posiciones&sort=xx&dir=yy").status_code == 200
+
+    class P:
+        def __init__(self, v):
+            self.v = v
+
+    rows = [P(2), P(None), P(1), P(3)]
+    POSITION_SORTS["t"] = ("t", lambda p: p.v)
+    try:
+        assert [p.v for p in sort_positions(rows, "t", "asc")] == [1, 2, 3, None]
+        assert [p.v for p in sort_positions(rows, "t", "desc")] == [3, 2, 1, None]
+    finally:
+        del POSITION_SORTS["t"]
