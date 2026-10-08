@@ -30,9 +30,14 @@ def upgrade() -> None:
         sa.Column("external_id", sa.String(length=64), nullable=True),
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=NOW, nullable=False),
-        sa.CheckConstraint("kind IN ('initial', 'dca', 'adjust')", name=op.f("ck_contributions_kind")),
+        sa.CheckConstraint(
+            "kind IN ('initial', 'dca', 'adjust')", name=op.f("ck_contributions_kind")
+        ),
         sa.ForeignKeyConstraint(
-            ["user_id"], ["users.id"], name=op.f("fk_contributions_user_id_users"), ondelete="CASCADE"
+            ["user_id"],
+            ["users.id"],
+            name=op.f("fk_contributions_user_id_users"),
+            ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_contributions")),
         sa.UniqueConstraint("user_id", "external_id", name=op.f("uq_contributions_user_id")),
