@@ -9,7 +9,7 @@ el último tipo de cambio conocido.
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import delete, func, or_, select
@@ -20,6 +20,7 @@ from app.config import get_settings, today
 from app.jobs import latest_fx
 from app.models import (
     Contribution,
+    CostAdjustment,
     DcaPlan,
     DividendEvent,
     DividendPayment,
@@ -303,6 +304,11 @@ def delete_position(
             Transaction.user_id == user_id, Transaction.security_id == security_id
         )
     ).rowcount
+    session.execute(
+        delete(CostAdjustment).where(
+            CostAdjustment.user_id == user_id, CostAdjustment.security_id == security_id
+        )
+    )
     divs = 0
     if not keep_dividends:
         divs = session.execute(
@@ -845,13 +851,26 @@ def _last_dividend(session: Session, security_id: int) -> LastDividend | None:
 def positions(session: Session, user_id: int, include_closed: bool = False) -> list[Position]:
     fx = latest_fx(session)
     by_sec: dict[int, Position] = {}
-    txs = session.scalars(
-        select(Transaction)
-        .where(Transaction.user_id == user_id)
-        .order_by(Transaction.trade_date, Transaction.id)
-    )
-    for t in txs:
+    txs = session.scalars(select(Transaction).where(Transaction.user_id == user_id)).all()
+    adjustments = session.scalars(
+        select(CostAdjustment).where(CostAdjustment.user_id == user_id)
+    ).all()
+
+    # Operaciones y ajustes de coste en orden cronológico; a igual día, por hora de alta (al
+    # segundo) y, si empatan, primero las operaciones
+    def when(row) -> tuple:
+        day = row.day if isinstance(row, CostAdjustment) else row.trade_date
+        made = row.created_at.replace(microsecond=0) if row.created_at else datetime.min  # noqa: DTZ901
+        return day, made, isinstance(row, CostAdjustment), row.id
+
+    for t in sorted([*txs, *adjustments], key=when):
         pos = by_sec.get(t.security_id)
+        if isinstance(t, CostAdjustment):
+            if pos is not None and pos.shares > 0:  # sin acciones no hay coste que corregir
+                new_cost = t.avg_eur * pos.shares
+                pos.invested_eur += new_cost - pos.cost_eur
+                pos.cost_eur = new_cost
+            continue
         if pos is None:
             pos = by_sec[t.security_id] = Position(session.get(Security, t.security_id))
         if t.kind == "buy":
@@ -1126,6 +1145,50 @@ def imported_dividends_eur(session: Session, user_id: int) -> float:
         )
     )
     return float(total or 0)
+
+
+def set_average_cost(
+    session: Session, user_id: int, security: Security, new_avg_eur: Decimal
+) -> CostAdjustment:
+    """Fija el precio medio (en EUR por acción) de una posición abierta.
+
+    No toca las operaciones: guarda un ajuste que se puede borrar para deshacerlo. El coste de
+    las acciones en cartera pasa a ser precio medio × acciones y lo invertido en el valor se
+    corrige por la diferencia.
+    """
+    if new_avg_eur <= 0:
+        raise PortfolioError("El precio medio debe ser positivo")
+    pos = next((p for p in positions(session, user_id) if p.security.id == security.id), None)
+    if pos is None:
+        raise PortfolioError(f"No tienes acciones de {security.symbol}")
+    old_avg = pos.cost_eur / pos.shares
+    new_avg = new_avg_eur.quantize(Decimal("0.000001"))
+    if abs(new_avg - old_avg) < Decimal("0.00005"):
+        raise PortfolioError("Ese ya es el precio medio actual")
+    row = CostAdjustment(
+        user_id=user_id,
+        security_id=security.id,
+        day=today(),
+        avg_eur=new_avg,
+        notes=f"De {old_avg:.4f} a {new_avg:.4f} € por acción",
+    )
+    session.add(row)
+    session.commit()
+    return row
+
+
+def held_security_ids(session: Session, user_id: int | None) -> set[int]:
+    """Valores con posición abierta del usuario (para resaltarlos en el screener y el seguimiento)."""
+    if user_id is None:
+        return set()
+    shares: dict[int, Decimal] = defaultdict(lambda: ZERO)
+    for security_id, kind, quantity in session.execute(
+        select(Transaction.security_id, Transaction.kind, Transaction.quantity).where(
+            Transaction.user_id == user_id
+        )
+    ):
+        shares[security_id] += quantity if kind == "buy" else -quantity
+    return {sid for sid, qty in shares.items() if qty > 0}
 
 
 def position_for(session: Session, user_id: int, security_id: int) -> Position | None:

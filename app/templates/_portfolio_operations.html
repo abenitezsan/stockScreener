@@ -10,6 +10,17 @@
     <td><form method="post" action="{{ ROOT }}/portfolio/transactions/{{ t.id }}/delete" onsubmit="return confirm('¿Borrar esta operación?')"><button class="danger" type="submit">Borrar</button></form></td>
   </tr>{% else %}<tr><td colspan="10">Sin operaciones.</td></tr>{% endfor %}</tbody>
 </table></div>
+{% if adjustments %}
+<h4>Ajustes del precio medio</h4>
+<div class="scroll-x"><table class="striped">
+  <thead><tr><th>Fecha</th><th>Valor</th><th class="num">Precio medio fijado</th><th>Detalle</th><th></th></tr></thead>
+  <tbody>{% for a, sec in adjustments %}<tr>
+    <td>{{ a.day.strftime('%d/%m/%Y') }}</td><td><a href="{{ ROOT }}/security/{{ sec.symbol }}">{{ sec.symbol }}</a></td>
+    <td class="num">{{ a.avg_eur | fmt('eur') }}</td><td>{{ a.notes or '' }}</td>
+    <td><form method="post" action="{{ ROOT }}/portfolio/cost-adjustments/{{ a.id }}/delete" onsubmit="return confirm('¿Deshacer este ajuste? El precio medio vuelve al que dan las operaciones.')"><button class="danger" type="submit">Deshacer</button></form></td>
+  </tr>{% endfor %}</tbody>
+</table></div>
+{% endif %}
 <h4>Dividendos cobrados</h4>
 <div class="scroll-x"><table class="striped">
   <thead><tr><th>Pago</th><th>Valor</th><th class="num">Acciones</th><th class="num">Bruto</th><th class="num">Retenciones</th><th class="num">Neto €</th><th>Origen</th><th></th></tr></thead>

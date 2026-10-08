@@ -11,6 +11,7 @@
   --status-warning: #c98500;
   --status-critical: #d03b3b;
   --hi-bg: rgba(250, 178, 25, 0.16);
+  --held-bg: rgba(42, 120, 214, 0.15);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -19,6 +20,7 @@
     --ref-fair: #c3c2b7;
     --status-warning: #fab219;
     --hi-bg: rgba(250, 178, 25, 0.12);
+    --held-bg: rgba(57, 135, 229, 0.24);
     --ink-muted-text: #9d9b95;
     --pos-text: #3fb950;
     --neg-text: #e05a5a;
@@ -33,6 +35,7 @@
   --ref-fair: #c3c2b7;
   --status-warning: #fab219;
   --hi-bg: rgba(250, 178, 25, 0.12);
+  --held-bg: rgba(57, 135, 229, 0.24);
 }
 
 body > main.container, body > header.container { max-width: 1600px; padding-inline: 1rem; }
@@ -335,3 +338,14 @@ form.inline label { display: inline-block; margin-right: 0.6rem; font-size: 0.8r
 .div-nav { display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 0.5rem; }
 .div-nav a[role=button] { margin: 0; padding: 0.2rem 0.7rem; width: auto; }
 svg.div-chart { max-height: 16rem; }
+
+/* Valores que ya tienes en cartera (screener y seguimiento) */
+.held-key { background: var(--held-bg); padding: 0 0.3rem; border-radius: 0.2rem; }
+tr.held > td { background: var(--held-bg) !important; }
+@media (min-width: 768px) {
+  .screener tbody tr.held > td.c-main { background: linear-gradient(var(--held-bg), var(--held-bg)), var(--pico-background-color) !important; }
+}
+@media (max-width: 767.98px) {
+  .screener tr.held > td { background: none !important; }
+  .screener tr.held { background: var(--held-bg) !important; }
+}

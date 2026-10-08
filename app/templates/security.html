@@ -42,6 +42,16 @@
   <details><summary>Cargar histórico de dividendos</summary>
     {% with sec_symbol=sec.symbol, sec_currency=sec.currency, back_to='/security/' ~ sec.symbol %}{% include "_portfolio_div_history_form.html" %}{% endwith %}
   </details>
+  {% if position and position.is_open %}
+  <details><summary>Editar precio medio</summary>
+    <p class="muted"><small>Ahora: {{ position.avg_cost_eur | fmt('eur') }} por acción (en €, con cambio y comisiones). Se guarda como un ajuste del coste: tus operaciones no cambian y puedes deshacerlo en la pestaña Operaciones. También corrige lo «invertido» que usa el total return.</small></p>
+    <form method="post" action="{{ ROOT }}/portfolio/securities/{{ sec.id }}/avg-cost" class="tx-form">
+      <input type="hidden" name="back" value="/security/{{ sec.symbol }}">
+      <label>Nuevo precio medio (€ por acción)<input type="text" inputmode="decimal" name="avg_price" required value="{{ '%.4f' | format(position.avg_cost_eur) | replace('.', ',') }}"></label>
+      <button type="submit">Guardar</button>
+    </form>
+  </details>
+  {% endif %}
   {% if position %}
   <details class="danger-zone"><summary>Eliminar posición</summary>
     <p class="muted"><small>Borra de golpe todas las operaciones de {{ sec.symbol }} (y sus dividendos, salvo que los conserves) sin validar ni recalcular nada. Lo que hayas aportado no cambia.</small></p>

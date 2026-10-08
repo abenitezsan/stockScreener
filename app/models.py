@@ -400,3 +400,23 @@ class PendingDocument(Base):
     sha256: Mapped[str] = mapped_column(String(64))
     data: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CostAdjustment(Base):
+    """Corrección manual del coste de una posición (editar el precio medio).
+
+    Desde `day`, el coste de las acciones en cartera pasa a ser `avg_eur` × acciones (y lo
+    invertido en el valor se corrige por la diferencia), sin tocar las operaciones. Se puede
+    borrar para deshacerla.
+    """
+
+    __tablename__ = "cost_adjustments"
+    __table_args__ = (Index(None, "user_id", "security_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    security_id: Mapped[int] = mapped_column(ForeignKey("securities.id", ondelete="RESTRICT"))
+    day: Mapped[date] = mapped_column(Date)
+    avg_eur: Mapped[Decimal] = mapped_column(Money)  # precio medio fijado, EUR por acción
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
