@@ -39,14 +39,45 @@ usa la última cotización y el último tipo de cambio (USD, GBP y demás se pas
     etiqueta) y los repetidos se ignoran (hash del PDF y comparación por contenido). Si el ISIN no
     corresponde a ningún valor, se pide el ticker de Yahoo una vez (si el valor no está en el
     universo, se da de alta y se descargan sus datos en segundo plano).
-  - **Importar posiciones:** `ticker o ISIN; acciones; coste medio en €`, una por línea, como una
-    compra a la fecha indicada (no repitas luego operaciones anteriores a esa fecha).
-  - **Compra o venta manual**, también desde la ficha del valor (bloque **Mi posición**).
+  - **Importar posiciones:** `ticker o ISIN; acciones; coste medio en €; dividendos cobrados en €`
+    (el último dato es opcional), una por línea, como una compra a la fecha indicada (no repitas
+    luego operaciones anteriores a esa fecha). Los dividendos ya cobrados cuentan en el total
+    return, pero no en el resumen fiscal (no se conoce su año ni sus retenciones).
+  - **Compra, venta o dividendo cobrado manuales** (con bruto y retenciones en origen y destino),
+    también desde la ficha del valor (bloque **Mi posición**).
+
+Los dividendos **no se añaden solos**: entran por PDF de HeyTrade o a mano. La proyección es solo una
+previsión y no genera cobros.
 
 Plantillas reconocidas: compra y dividendo nacional (con ejemplos reales). La **venta** y el
 **dividendo extranjero** (retención en origen) se han supuesto con las mismas etiquetas y no están
 verificados con un PDF real. Los tests usan el texto de los PDFs sin datos personales
 (`tests/fixtures/heytrade/`).
+
+## Buzón: PDFs de HeyTrade por email
+
+La app puede leer sola, cada 15 minutos, un buzón IMAP al que reenvías los correos de HeyTrade
+(compras, ventas y abonos de dividendos): se guardan con la fecha y los importes del PDF, sin subirlos
+a mano. Se activa solo si defines `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD` y
+`IMAP_ALLOWED_SENDERS` en el `.env` (ver `.env.example`).
+
+1. **Buzón dedicado** (p. ej. GMX gratuito, con IMAP activado en *Ajustes → POP3 e IMAP*).
+2. **Reenvío desde tu Gmail:** *Ajustes → Reenvío* (añadir y confirmar la dirección) y un filtro
+   `from:(noreply@heytrade.com) has:attachment` → «Reenviar a». También sirve reenviar a mano.
+3. **`IMAP_ALLOWED_SENDERS`:** el remitente de HeyTrade y, si reenvías a mano, tu propio Gmail.
+   Un correo solo se acepta si su remitente está en la lista **y** el proveedor del buzón lo
+   autentica: la cabecera `Authentication-Results` de `IMAP_AUTHSERV` (`gmx.net` por defecto) debe
+   dar `dmarc=pass` (o `dkim=pass` alineado) para el dominio del remitente. Los PDFs no van
+   firmados, así que sin esto cualquiera que conociera la dirección podría colar uno falso.
+4. **Qué pasa con cada correo:** se leen sus PDFs, se guardan (los repetidos se ignoran) y el correo
+   queda marcado como leído. Si falla algo transitorio (p. ej. la base de datos), queda sin leer y se
+   reintenta. Si el ISIN no corresponde a ningún valor, el PDF espera en *Cartera → Añadir e
+   importar* a que indiques su ticker y entonces se procesa solo.
+5. **Las operaciones se asignan** a la cuenta `IMAP_TARGET_USER` (por defecto, `SUPERADMIN_EMAIL`).
+
+Prueba manual en el VPS: `docker compose exec stockscreener python -m app.cli mailbox-check`.
+El panel *Cartera → Añadir e importar → Buzón* muestra la última revisión (en memoria: se reinicia
+con la app) y las incidencias; el detalle está en `app.log`.
 
 ## Cuentas de usuario
 

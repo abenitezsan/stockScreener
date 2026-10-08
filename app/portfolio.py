@@ -21,6 +21,7 @@ from app.jobs import latest_fx
 from app.models import (
     DividendEvent,
     DividendPayment,
+    PendingDocument,
     Quote,
     Security,
     Transaction,
@@ -251,6 +252,110 @@ def record_pdf(session: Session, user_id: int, filename: str, data: bytes) -> Do
         return DocResult(filename, status, f"{security.symbol}: {exc}", doc.isin)
 
 
+def add_received_dividend(
+    session: Session,
+    user_id: int,
+    security: Security,
+    *,
+    pay_date: date,
+    shares: Decimal,
+    gross: Decimal,
+    currency: str | None = None,
+    withholding_origin: Decimal = ZERO,
+    withholding_domestic: Decimal = ZERO,
+    fx_rate: Decimal | None = None,
+    ex_date: date | None = None,
+    source: str = "manual",
+) -> DividendPayment:
+    """Dividendo ya cobrado, a mano o importado junto a una posición (bruto y retenciones)."""
+    base = get_settings().base_currency
+    cur = (currency or security.currency or base).upper()
+    if gross <= 0 or shares <= 0 or withholding_origin < 0 or withholding_domestic < 0:
+        raise PortfolioError("Acciones y bruto deben ser positivos y las retenciones no negativas")
+    if withholding_origin + withholding_domestic > gross:
+        raise PortfolioError("Las retenciones no pueden superar el bruto")
+    if pay_date > today():
+        raise PortfolioError("La fecha de cobro no puede ser futura")
+    if cur == base:
+        fx_rate = Decimal(1)
+    elif fx_rate is None:
+        rate = latest_fx(session).get(cur)
+        if rate is None:
+            raise PortfolioError(f"Indica el tipo de cambio {cur}→{base}")
+        fx_rate = Decimal(str(rate))
+    net = gross - withholding_origin - withholding_domestic
+    doc = heytrade.DividendDoc(
+        isin=security.isin or "",
+        name=security.name or "",
+        currency=cur,
+        per_share=(gross / shares).quantize(Decimal("0.000001")),
+        ex_date=ex_date,
+        pay_date=pay_date,
+        shares=shares,
+        gross=gross,
+        withholding_origin=withholding_origin,
+        withholding_domestic=withholding_domestic,
+        withholding_rate=None,
+        fees=ZERO,
+        net=net,
+        fx_rate=fx_rate,
+        net_base=(net * fx_rate).quantize(Decimal("0.01")),
+    )
+    return add_dividend(session, user_id, security, doc, source)
+
+
+def store_pending(session: Session, user_id: int, result: DocResult, data: bytes) -> None:
+    """Guarda un PDF cuyo ISIN no se reconoce hasta que se asigne su ticker."""
+    import hashlib
+
+    digest = hashlib.sha256(data).hexdigest()
+    if session.scalar(
+        select(PendingDocument.id).where(
+            PendingDocument.user_id == user_id, PendingDocument.sha256 == digest
+        )
+    ):
+        return
+    session.add(
+        PendingDocument(
+            user_id=user_id,
+            isin=result.isin,
+            name=result.name or None,
+            filename=(result.filename or "adjunto.pdf")[:255],
+            sha256=digest,
+            data=data,
+        )
+    )
+    session.commit()
+
+
+def pending_summary(session: Session, user_id: int) -> list[tuple[str, str, int]]:
+    """(ISIN, nombre, nº de documentos) de lo que espera un ticker."""
+    rows = session.execute(
+        select(PendingDocument.isin, func.max(PendingDocument.name), func.count())
+        .where(PendingDocument.user_id == user_id)
+        .group_by(PendingDocument.isin)
+        .order_by(PendingDocument.isin)
+    ).all()
+    return [(isin, name or "", n) for isin, name, n in rows]
+
+
+def process_pending(session: Session, user_id: int, isin: str | None = None) -> list[DocResult]:
+    """Procesa los PDFs pendientes (de un ISIN, o todos) cuyo valor ya se conoce."""
+    query = select(PendingDocument).where(PendingDocument.user_id == user_id)
+    if isin:
+        query = query.where(PendingDocument.isin == isin)
+    results = []
+    for doc in list(session.scalars(query)):
+        if find_security(session, doc.isin) is None:
+            continue
+        result = record_pdf(session, user_id, doc.filename, doc.data)
+        if result.status in ("ok", "duplicate"):
+            session.delete(doc)
+            session.commit()
+        results.append(result)
+    return results
+
+
 def assign_isin(session: Session, isin: str, symbol: str) -> Security:
     """Enlaza un ISIN con un ticker de Yahoo; si el valor no existe, lo da de alta."""
     from app import universe
@@ -293,9 +398,10 @@ def fetch_market_data(symbol: str) -> None:
 
 
 def parse_positions(session: Session, text: str) -> tuple[list[tuple], list[str]]:
-    """Posiciones pegadas, una por línea: `ticker o ISIN; acciones; coste medio en EUR`.
+    """Posiciones pegadas, una por línea: `ticker o ISIN; acciones; coste medio en EUR` y,
+    opcionalmente, `; dividendos ya cobrados (bruto, EUR, acumulado)`.
 
-    Devuelve las filas válidas (valor, acciones, coste medio) y los errores por línea.
+    Devuelve las filas válidas (valor, acciones, coste medio, dividendos) y los errores por línea.
     """
     rows, errors = [], []
     for n, line in enumerate(text.splitlines(), 1):
@@ -304,8 +410,10 @@ def parse_positions(session: Session, text: str) -> tuple[list[tuple], list[str]
         parts = [p.strip() for p in re.split(r"[;\t]|(?<=\S),(?=\s)|\s{2,}", line.strip()) if p]
         if len(parts) == 1:
             parts = line.split()
-        if len(parts) != 3:
-            errors.append(f"Línea {n}: se esperan 3 columnas (ticker, acciones, coste medio)")
+        if len(parts) not in (3, 4):
+            errors.append(
+                f"Línea {n}: se esperan 3 o 4 columnas (ticker, acciones, coste medio, dividendos)"
+            )
             continue
         sec = find_security(session, parts[0])
         if sec is None:
@@ -315,13 +423,14 @@ def parse_positions(session: Session, text: str) -> tuple[list[tuple], list[str]
             continue
         try:
             shares, avg = heytrade.parse_number(parts[1]), heytrade.parse_number(parts[2])
+            dividends = heytrade.parse_number(parts[3]) if len(parts) == 4 else ZERO
         except heytrade.ParseError:
             errors.append(f"Línea {n}: número no válido")
             continue
-        if shares <= 0 or avg <= 0:
+        if shares <= 0 or avg <= 0 or dividends < 0:
             errors.append(f"Línea {n}: acciones y coste medio deben ser positivos")
             continue
-        rows.append((sec, shares, avg))
+        rows.append((sec, shares, avg, dividends))
     return rows, errors
 
 
@@ -615,7 +724,7 @@ def tax_summary(session: Session, user_id: int) -> list[TaxYear]:
     payments = session.execute(
         select(DividendPayment, Security)
         .join(Security, Security.id == DividendPayment.security_id)
-        .where(DividendPayment.user_id == user_id)
+        .where(DividendPayment.user_id == user_id, DividendPayment.source != "import")
         .order_by(DividendPayment.pay_date)
     ).all()
     for pay, sec in payments:
@@ -643,6 +752,20 @@ def tax_summary(session: Session, user_id: int) -> list[TaxYear]:
         c["origin"] += row.origin_eur
         c["domestic"] += row.domestic_eur
     return sorted(years.values(), key=lambda y: -y.year)
+
+
+def imported_dividends_eur(session: Session, user_id: int) -> float:
+    """Dividendos cobrados antes de empezar a usar la app (importados con la posición), en EUR.
+
+    Cuentan en el total return, pero no entran en el resumen fiscal: no se sabe en qué año se
+    cobraron ni sus retenciones.
+    """
+    total = session.scalar(
+        select(func.sum(DividendPayment.net_base)).where(
+            DividendPayment.user_id == user_id, DividendPayment.source == "import"
+        )
+    )
+    return float(total or 0)
 
 
 def position_for(session: Session, user_id: int, security_id: int) -> Position | None:

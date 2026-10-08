@@ -23,4 +23,5 @@
       <td class="num">{{ r.payment.withholding_rate | fmt('pct') }}</td><td class="num">{{ r.net_eur | fmt('eur') }}</td></tr>{% endfor %}</tbody>
   </table></div>
 </section>
-{% else %}<p>Aún no hay dividendos cobrados.</p>{% endfor %}
+{% else %}<p>Aún no hay dividendos cobrados con fecha.</p>{% endfor %}
+{% if imported_dividends %}<p class="muted"><small>No incluye {{ imported_dividends | fmt('eur') }} importados con la posición: no se conoce su año ni sus retenciones.</small></p>{% endif %}

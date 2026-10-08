@@ -17,7 +17,7 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 
-from app import heytrade, portfolio
+from app import heytrade, mailbox, portfolio
 from app.config import get_settings, today
 from app.jobs import latest_fx
 from app.models import DividendPayment, Security, Transaction
@@ -81,9 +81,15 @@ def _page(
         ctx["by_currency"] = portfolio.allocation(open_rows, lambda p: p.security.currency)
     if tab == "dividendos":
         ctx["projection"] = portfolio.project_dividends(session, open_rows)
-        ctx["received"] = [y for y in portfolio.tax_summary(session, user.id)]
+        ctx["received"] = portfolio.tax_summary(session, user.id)
+        ctx["imported_dividends"] = portfolio.imported_dividends_eur(session, user.id)
     if tab == "fiscal":
         ctx["years"] = portfolio.tax_summary(session, user.id)
+        ctx["imported_dividends"] = portfolio.imported_dividends_eur(session, user.id)
+    if tab == "importar":
+        ctx["pending"] = portfolio.pending_summary(session, user.id)
+        ctx["mailbox_on"] = mailbox.configured()
+        ctx["mailbox"] = mailbox.STATUS
     if tab == "operaciones":
         ctx["transactions"] = session.execute(
             select(Transaction, Security)
@@ -151,14 +157,14 @@ def set_isin(
         return _page(request, session, user, "importar", errors=[str(exc)], status=400)
     if security.price_currency is None:  # valor nuevo: faltan ficha, histórico y cotización
         background.add_task(portfolio.fetch_market_data, security.symbol)
-    return _page(
-        request,
-        session,
-        user,
-        "importar",
-        notice=f"{isin.strip().upper()} asignado a {security.symbol}. Vuelve a subir los PDFs "
-        "pendientes (los ya cargados se ignoran). Los datos de mercado tardan un minuto.",
-    )
+    # Los PDFs que esperaban este ticker (p. ej. los del buzón) se procesan ya
+    results = portfolio.process_pending(session, user.id, isin.strip().upper())
+    notice = f"{isin.strip().upper()} asignado a {security.symbol}."
+    if results:
+        notice += f" Se han procesado {len(results)} documentos pendientes."
+    else:
+        notice += " Si tienes PDFs de este valor, vuelve a subirlos."
+    return _page(request, session, user, "importar", results=results, notice=notice)
 
 
 @router.post("/portfolio/positions", response_class=HTMLResponse)
@@ -183,7 +189,7 @@ def import_positions(
             errors=errors or ["No hay ninguna posición que importar"],
             status=400,
         )
-    for sec, shares, avg in rows:
+    for sec, shares, avg, dividends in rows:
         try:
             portfolio.add_transaction(
                 session,
@@ -197,6 +203,17 @@ def import_positions(
                 source="import",
                 notes="Posición importada",
             )
+            if dividends > 0:
+                portfolio.add_received_dividend(
+                    session,
+                    user.id,
+                    sec,
+                    pay_date=day,
+                    shares=shares,
+                    gross=dividends,
+                    currency=get_settings().base_currency,
+                    source="import",
+                )
         except portfolio.PortfolioError as exc:
             session.rollback()
             errors.append(f"{sec.symbol}: {exc}")
@@ -256,6 +273,49 @@ def add_manual_transaction(
             fx_rate=fx,
             fees=fee,
             total_eur=total,
+        )
+    except (portfolio.PortfolioError, InvalidOperation) as exc:
+        session.rollback()
+        return _page(request, session, user, "importar", errors=[str(exc)], status=400)
+    target = _back(back)
+    sep = "&" if "?" in target else "?"
+    return RedirectResponse(f"{ROOT}{target}{sep}done=op", status_code=303)
+
+
+@router.post("/portfolio/dividends", response_class=HTMLResponse)
+def add_manual_dividend(
+    request: Request,
+    session: DbSession,
+    user: PortfolioUser,
+    ident: str = Form(...),
+    pay_date: str = Form(...),
+    shares: str = Form(...),
+    gross: str = Form(...),
+    currency: str = Form(""),
+    withholding_origin: str = Form("0"),
+    withholding_domestic: str = Form("0"),
+    fx_rate: str = Form(""),
+    back: str = Form(""),
+):
+    try:
+        sec = portfolio.find_security(session, ident)
+        if sec is None:
+            raise portfolio.PortfolioError(f"«{ident.strip()}» no está en el universo")
+        try:
+            day = date.fromisoformat(pay_date)
+        except ValueError:
+            raise portfolio.PortfolioError("Fecha no válida") from None
+        portfolio.add_received_dividend(
+            session,
+            user.id,
+            sec,
+            pay_date=day,
+            shares=_number(shares, "Acciones"),
+            gross=_number(gross, "Bruto"),
+            currency=currency.strip() or None,
+            withholding_origin=_number(withholding_origin or "0", "Retención en origen"),
+            withholding_domestic=_number(withholding_domestic or "0", "Retención en destino"),
+            fx_rate=_number(fx_rate, "Tipo de cambio") if fx_rate.strip() else None,
         )
     except (portfolio.PortfolioError, InvalidOperation) as exc:
         session.rollback()

@@ -11,6 +11,7 @@ from sqlalchemy import (
     Double,
     ForeignKey,
     Index,
+    LargeBinary,
     MetaData,
     Numeric,
     String,
@@ -330,4 +331,21 @@ class DividendPayment(Base):
     source: Mapped[str] = mapped_column(String(10), server_default="manual")
     external_id: Mapped[str | None] = mapped_column(String(64))
     notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PendingDocument(Base):
+    """PDF leído del buzón cuyo ISIN aún no corresponde a ningún valor: espera a que el usuario
+    indique el ticker; entonces se procesa solo."""
+
+    __tablename__ = "pending_documents"
+    __table_args__ = (UniqueConstraint("user_id", "sha256"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    isin: Mapped[str] = mapped_column(String(12), index=True)
+    name: Mapped[str | None] = mapped_column(String(255))
+    filename: Mapped[str] = mapped_column(String(255))
+    sha256: Mapped[str] = mapped_column(String(64))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

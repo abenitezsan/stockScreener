@@ -9,7 +9,7 @@ import time
 
 from sqlalchemy import func, select
 
-from app import auth, jobs, universe
+from app import auth, jobs, mailbox, universe
 from app.db import SessionLocal, engine
 from app.logging_setup import setup_logging
 from app.models import (
@@ -37,6 +37,11 @@ BOOTSTRAP = ["fx", "profiles", "fx", "history", "quotes", "financials", "valuati
 def main() -> None:
     parser = argparse.ArgumentParser(prog="python -m app.cli")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    sub.add_parser(
+        "mailbox-check",
+        help="Revisa ahora el buzón IMAP de los PDFs de HeyTrade y muestra el resultado",
+    )
 
     p = sub.add_parser("universe", help="Descarga los índices y actualiza el universo")
     p.add_argument("--source", nargs="*", choices=list(universe.SOURCES))
@@ -103,6 +108,10 @@ def main() -> None:
                 print(set_user_password(session, args.email, _ask_password()))
             except ValueError as error:
                 sys.exit(str(error))
+        elif args.command == "mailbox-check":
+            print(mailbox.run_poll(session))
+            for line in mailbox.STATUS.log:
+                print(" -", line)
         elif args.command == "universe":
             for name, result in universe.sync_sources(session, args.source, args.file).items():
                 print(f"{name}: {result}")

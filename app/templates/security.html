@@ -34,6 +34,9 @@
   <details><summary>Añadir compra o venta</summary>
     {% with sec_symbol=sec.symbol, sec_currency=sec.currency %}{% include "_portfolio_tx_form.html" %}{% endwith %}
   </details>
+  <details><summary>Añadir dividendo cobrado</summary>
+    {% with sec_symbol=sec.symbol, sec_currency=sec.currency %}{% include "_portfolio_div_form.html" %}{% endwith %}
+  </details>
   {% if position %}<p><small><a href="{{ ROOT }}/portfolio">Ver toda la cartera</a></small></p>{% endif %}
 </section>
 {% endif %}

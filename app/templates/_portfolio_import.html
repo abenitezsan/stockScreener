@@ -1,3 +1,17 @@
+{% if pending %}
+<article class="alert-hard" role="note">
+  <header>Documentos pendientes de ticker</header>
+  <p>Hay PDFs leídos del buzón de valores que aún no conozco. Indica el ticker de Yahoo y se procesarán solos.</p>
+  {% for isin, name, n in pending %}
+  <form method="post" action="{{ ROOT }}/portfolio/isin" class="inline">
+    <span>{{ name or isin }} ({{ isin }}) · {{ n }} documento{{ 's' if n != 1 }}</span>
+    <input type="hidden" name="isin" value="{{ isin }}">
+    <input type="text" name="symbol" placeholder="Ticker de Yahoo (EBRO.MC)" required maxlength="32" pattern="[A-Za-z0-9.\-^=]+">
+    <button type="submit">Asignar</button>
+  </form>
+  {% endfor %}
+</article>
+{% endif %}
 <div class="import-grid">
 <article>
   <h4>PDFs de HeyTrade</h4>
@@ -23,16 +37,32 @@
 
 <article>
   <h4>Importar posiciones</h4>
-  <p class="muted">Una por línea: <code>ticker o ISIN; acciones; coste medio en €</code>, por ejemplo <code>O; 11; 48,60</code>. Se guardan como una compra a la fecha indicada: si luego subes PDFs, no repitas operaciones anteriores a esa fecha.</p>
+  <p class="muted">Una por línea: <code>ticker o ISIN; acciones; coste medio en €; dividendos cobrados en €</code>, por ejemplo <code>O; 11; 48,60; 35,20</code>. El último dato es opcional: es el total bruto que ya has cobrado de ese valor y cuenta en el total return (no entra en el resumen fiscal). Se guardan como una compra a la fecha indicada: si luego subes PDFs, no repitas operaciones anteriores a esa fecha.</p>
   <form method="post" action="{{ ROOT }}/portfolio/positions" class="stack">
-    <textarea name="text" rows="6" placeholder="SAN.MC; 100; 3,85&#10;O; 11; 48,60" required></textarea>
+    <textarea name="text" rows="6" placeholder="SAN.MC; 100; 3,85; 12,50&#10;O; 11; 48,60" required></textarea>
     <label>Posiciones a fecha de <input type="date" name="as_of" value="{{ today.isoformat() }}" max="{{ today.isoformat() }}"></label>
     <button type="submit">Importar</button>
   </form>
 </article>
 
+{% if mailbox_on %}
+<article class="wide">
+  <h4>Buzón</h4>
+  {% if mailbox.last_run %}<p class="muted">Última revisión: {{ mailbox.last_run.strftime('%d/%m/%Y %H:%M') }} UTC · {{ mailbox.messages }} correos, {{ mailbox.documents }} documentos guardados.
+    {% if mailbox.last_error %}<span class="neg">Error: {{ mailbox.last_error }}</span>{% endif %}</p>
+  {% else %}<p class="muted">Aún no se ha revisado desde el último arranque (se revisa cada pocos minutos).</p>{% endif %}
+  {% if mailbox.log %}<ul>{% for line in mailbox.log %}<li><small>{{ line }}</small></li>{% endfor %}</ul>{% endif %}
+</article>
+{% endif %}
+
 <article class="wide">
   <h4>Añadir compra o venta</h4>
   {% include "_portfolio_tx_form.html" %}
+</article>
+
+<article class="wide">
+  <h4>Añadir dividendo cobrado</h4>
+  <p class="muted">Con bruto y retenciones en la divisa del dividendo: alimenta el total return y el resumen fiscal.</p>
+  {% include "_portfolio_div_form.html" %}
 </article>
 </div>
