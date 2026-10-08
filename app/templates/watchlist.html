@@ -2,7 +2,7 @@
 {% block title %}Seguimiento · Stock Screener{% endblock %}
 {% block content %}
 <h2>Seguimiento</h2>
-<p class="muted">Valores marcados con ☆ en el screener. El precio de compra usa el margen de seguridad y la rentabilidad objetivo de cada valor (se cambian en su ficha).</p>
+<p class="muted">Valores marcados con ☆ en el screener. Los que ya tienes en cartera aparecen resaltados en <span class="held-key">azul</span>. El precio de compra usa el margen de seguridad y la rentabilidad objetivo de cada valor (se cambian en su ficha).</p>
 <div class="overflow-auto">
 <table class="striped">
   <thead><tr>
@@ -14,9 +14,9 @@
   </tr></thead>
   <tbody>
   {% for r in rows %}{% set v = r.valuation %}{% set f = r.fundamentals %}
-    <tr>
+    <tr{% if r.security.id in held %} class="held"{% endif %}>
       <td>{% with id=r.security.id, watched=True %}{% include "_watch_button.html" %}{% endwith %}</td>
-      <td><a href="{{ ROOT }}/security/{{ r.security.symbol }}">{{ r.security.symbol }}</a></td>
+      <td><a href="{{ ROOT }}/security/{{ r.security.symbol }}">{{ r.security.symbol }}</a>{% if r.security.id in held %}<span class="visually-hidden"> (en cartera)</span>{% endif %}</td>
       <td class="name" title="{{ r.security.name or '' }}">{{ r.security.name or '–' }}</td>
       <td>{% with signal=r.signal %}{% include "_signal.html" %}{% endwith %}</td>
       <td class="num">{{ r.price | fmt }}</td>

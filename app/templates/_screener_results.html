@@ -16,7 +16,7 @@
 </div>
 
 <div class="results-bar">
-  <p class="muted">{{ rows | length }} valores{% if rows | length >= 500 %} (500 primeros){% endif %} · <span class="hi-key">yield &gt; 6 %</span></p>
+  <p class="muted">{{ rows | length }} valores{% if rows | length >= 500 %} (500 primeros){% endif %} · <span class="hi-key">yield &gt; 6 %</span>{% if held %} · <span class="held-key">en cartera</span>{% endif %}</p>
   <div class="sort-mobile">
     <label for="sort-select" class="muted">Ordenar</label>
     <select id="sort-select" onchange="setFilter('sort', this.value)">
@@ -43,12 +43,12 @@
     {% set flag, country = row.country | country_flag %}
     {% set hard = row.flags and row.flags | select('in', HARD_FLAGS) | list %}
     {% set flag_text = row.flags | flag_labels %}
-    <tr>
+    <tr{% if row.id in held %} class="held"{% endif %}>
       <td class="c-star">{% with id=row.id, watched=row.id in watched %}{% include "_watch_button.html" %}{% endwith %}</td>
       <td class="c-main">
         <div class="tk">
           {% if flag %}<span class="cflag" role="img" aria-label="{{ country }}" title="{{ country }}">{{ flag }}</span>{% elif row.country %}<span class="ccode muted" title="{{ country }}">{{ row.country[:3] }}</span>{% endif %}
-          <a href="{{ ROOT }}/security/{{ row.symbol }}">{{ row.symbol }}</a>
+          <a href="{{ ROOT }}/security/{{ row.symbol }}">{{ row.symbol }}</a>{% if row.id in held %}<span class="visually-hidden"> (en cartera)</span>{% endif %}
           {{ sector_icon(row.sector, "icon sector m-only") }}
           {% if hard %}<svg class="icon warn m-only" role="img" aria-label="{{ flag_text }}"><title>{{ flag_text }}</title><use href="#i-alert"/></svg>{% endif %}
         </div>

@@ -1128,6 +1128,20 @@ def imported_dividends_eur(session: Session, user_id: int) -> float:
     return float(total or 0)
 
 
+def held_security_ids(session: Session, user_id: int | None) -> set[int]:
+    """Valores con posición abierta del usuario (para resaltarlos en el screener y el seguimiento)."""
+    if user_id is None:
+        return set()
+    shares: dict[int, Decimal] = defaultdict(lambda: ZERO)
+    for security_id, kind, quantity in session.execute(
+        select(Transaction.security_id, Transaction.kind, Transaction.quantity).where(
+            Transaction.user_id == user_id
+        )
+    ):
+        shares[security_id] += quantity if kind == "buy" else -quantity
+    return {sid for sid, qty in shares.items() if qty > 0}
+
+
 def position_for(session: Session, user_id: int, security_id: int) -> Position | None:
     """Posición del usuario en un valor (para el bloque «Mi posición» de su ficha)."""
     has = session.scalar(

@@ -395,6 +395,7 @@ def _screener_context(
             and c not in ("symbol", "name", "sector", "country")
         ],
         "watched": screener.watchlist_ids(session, user.id if user else None),
+        "held": portfolio.held_security_ids(session, user.id if user else None),
     }
 
 
@@ -438,7 +439,12 @@ def toggle_watch(request: Request, security_id: int, session: DbSession, user: A
 @router.get("/watchlist", response_class=HTMLResponse)
 def watchlist_page(request: Request, session: DbSession, user: WatchlistUser):
     return templates.TemplateResponse(
-        request, "watchlist.html", {"rows": screener.watchlist(session, user.id)}
+        request,
+        "watchlist.html",
+        {
+            "rows": screener.watchlist(session, user.id),
+            "held": portfolio.held_security_ids(session, user.id),
+        },
     )
 
 

@@ -597,3 +597,37 @@ def test_dividend_calendar_navigation(client):
         cal = portfolio.dividend_calendar(s, user.id, portfolio.project_dividends(s, pos))
         assert len(cal.months) == 12 and cal.months[0].month == today().month
         assert cal.avg_months == 12 and 0 <= cal.avg_received_gross <= 90 / 12
+
+
+def test_held_positions_highlighted_in_screener_and_watchlist(client):
+    from app import auth
+
+    auth._failures.clear()
+    user = _user(client, "resaltar@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50", "as_of": "2026-01-02"})
+    with _db() as s:
+        aaa, bbb = _sec(s, "AAA"), _sec(s, "BBB.MC")
+        assert portfolio.held_security_ids(s, user.id) == {aaa.id}
+        assert portfolio.held_security_ids(s, None) == set()
+        bbb_id = bbb.id
+    page = client.get("/screener?partial=1", headers={"HX-Request": "true"}).text
+    assert 'class="held"' in page and page.count('class="held"') == 1
+    assert "en cartera" in page
+    # el seguimiento resalta también los valores en cartera
+    for sec_id in (aaa.id, bbb_id):
+        client.post(f"/watchlist/{sec_id}/toggle")
+    wl = client.get("/watchlist").text
+    assert wl.count('class="held"') == 1
+    # una venta total deja de resaltarlo
+    client.post(
+        "/portfolio/transactions",
+        data={
+            "ident": "AAA",
+            "kind": "sell",
+            "trade_date": "2026-03-01",
+            "quantity": "10",
+            "price": "60",
+        },
+    )
+    with _db() as s:
+        assert portfolio.held_security_ids(s, user.id) == set()
