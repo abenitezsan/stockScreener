@@ -21,7 +21,7 @@ from datetime import datetime
 from email import message_from_bytes, policy
 from email.message import EmailMessage
 from email.utils import parseaddr
-from typing import Protocol
+from typing import Protocol, Self
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -170,7 +170,7 @@ class ImapClient:
         self.password, self.folder = password, folder
         self.conn: imaplib.IMAP4_SSL | None = None
 
-    def __enter__(self) -> "ImapClient":
+    def __enter__(self) -> Self:
         self.conn = imaplib.IMAP4_SSL(self.host, self.port, timeout=30)
         self.conn.login(self.user, self.password)
         status, _ = self.conn.select(self.folder)
@@ -183,8 +183,8 @@ class ImapClient:
             try:
                 self.conn.close()
                 self.conn.logout()
-            except Exception:  # la conexión puede haberse cerrado ya
-                pass
+            except (imaplib.IMAP4.error, OSError):  # la conexión puede haberse cerrado ya
+                log.debug("Cierre del buzón con la conexión ya caída", exc_info=True)
 
     def unseen(self, limit: int) -> Iterator[tuple[bytes, bytes]]:
         assert self.conn is not None
