@@ -21,7 +21,14 @@ from sqlalchemy import select
 from app import heytrade, mailbox, portfolio
 from app.config import get_settings, today
 from app.jobs import latest_fx
-from app.models import Contribution, DcaPlan, DividendPayment, Security, Transaction
+from app.models import (
+    Contribution,
+    CostAdjustment,
+    DcaPlan,
+    DividendPayment,
+    Security,
+    Transaction,
+)
 from app.web import ROOT, DbSession, PortfolioUser, current_user, render_security, templates
 
 router = APIRouter(dependencies=[Depends(current_user)])
@@ -195,6 +202,12 @@ def _page(
             .where(Transaction.user_id == user.id)
             .order_by(Transaction.trade_date.desc(), Transaction.id.desc())
         ).all()
+        ctx["adjustments"] = session.execute(
+            select(CostAdjustment, Security)
+            .join(Security, Security.id == CostAdjustment.security_id)
+            .where(CostAdjustment.user_id == user.id)
+            .order_by(CostAdjustment.day.desc(), CostAdjustment.id.desc())
+        ).all()
         ctx["dividends"] = session.execute(
             select(DividendPayment, Security)
             .join(Security, Security.id == DividendPayment.security_id)
@@ -216,6 +229,7 @@ def portfolio_page(
     notice = {
         "op": "Operación guardada.",
         "pos": "Posición eliminada.",
+        "avg": "Precio medio actualizado.",
         "contrib": "Aportación guardada.",
         "dca": "DCA guardado.",
         "deleted": "Eliminado.",
@@ -476,6 +490,37 @@ def delete_position(
         raise HTTPException(404)
     portfolio.delete_position(session, user.id, security_id, keep_dividends=bool(keep_dividends))
     return RedirectResponse(f"{ROOT}/portfolio?tab=posiciones&done=pos", status_code=303)
+
+
+@router.post("/portfolio/securities/{security_id}/avg-cost", response_class=HTMLResponse)
+def edit_average_cost(
+    request: Request,
+    security_id: int,
+    session: DbSession,
+    user: PortfolioUser,
+    avg_price: str = Form(...),
+    back: str = Form(""),
+):
+    sec = session.get(Security, security_id)
+    if sec is None:
+        raise HTTPException(404)
+    try:
+        portfolio.set_average_cost(session, user.id, sec, _number(avg_price, "Precio medio"))
+    except (portfolio.PortfolioError, InvalidOperation) as exc:
+        session.rollback()
+        return _fail(request, session, user, back, [str(exc)], default_tab="posiciones")
+    target = _back(back)
+    if not target.startswith("/security/"):
+        target = "/portfolio?tab=posiciones"
+    return RedirectResponse(
+        f"{ROOT}{target}{'&' if '?' in target else '?'}done=avg", status_code=303
+    )
+
+
+@router.post("/portfolio/cost-adjustments/{row_id}/delete")
+def delete_cost_adjustment(row_id: int, session: DbSession, user: PortfolioUser):
+    _delete(session, user, CostAdjustment, row_id)
+    return RedirectResponse(f"{ROOT}/portfolio?tab=operaciones&done=deleted", status_code=303)
 
 
 @router.post("/portfolio/contributions", response_class=HTMLResponse)

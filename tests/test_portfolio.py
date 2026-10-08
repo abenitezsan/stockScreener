@@ -631,3 +631,52 @@ def test_held_positions_highlighted_in_screener_and_watchlist(client):
     )
     with _db() as s:
         assert portfolio.held_security_ids(s, user.id) == set()
+
+
+def test_edit_average_price(client):
+    from sqlalchemy import select
+
+    from app import auth
+    from app.config import today
+    from app.models import CostAdjustment
+
+    auth._failures.clear()
+    user = _user(client, "precio@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50", "as_of": "2026-01-02"})
+    with _db() as s:
+        sid = _sec(s, "AAA").id
+    # una venta antes de editar el precio medio: usa el precio medio de entonces (50)
+    sell = {"ident": "AAA", "kind": "sell", "trade_date": today().isoformat(), "price": "60"}
+    client.post("/portfolio/transactions", data={**sell, "quantity": "4"})
+    form = f"/portfolio/securities/{sid}/avg-cost"
+    detail = client.get("/security/AAA").text
+    assert "Editar precio medio" in detail and form in detail
+    # quedan 6 acciones: 50 -> 42,5 €; el coste pasa de 300 a 255 y lo invertido baja igual
+    with _db() as s:
+        before = portfolio.position_for(s, user.id, sid)
+        assert before.avg_cost_eur == pytest.approx(50) and before.invested_eur == D("500")
+        realized = before.realized_eur
+    assert realized > 0
+    r = client.post(
+        form, data={"avg_price": "42,5", "back": "/security/AAA"}, follow_redirects=False
+    )
+    assert r.status_code == 303 and r.headers["location"].endswith("/security/AAA?done=avg")
+    with _db() as s:
+        pos = portfolio.position_for(s, user.id, sid)
+        assert pos.avg_cost_eur == pytest.approx(42.5) and pos.cost_eur == D("255")
+        assert pos.invested_eur == D("455") and pos.realized_eur == realized
+        adj = s.scalars(select(CostAdjustment).where(CostAdjustment.user_id == user.id)).one()
+        assert adj.avg_eur == D("42.5")
+        adj_id = adj.id
+    # errores: mismo precio, no positivo, no numérico; se ven en la ficha
+    same = client.post(form, data={"avg_price": "42,5", "back": "/security/AAA"})
+    assert same.status_code == 400 and "ya es el precio medio" in same.text
+    assert client.post(form, data={"avg_price": "0", "back": "/security/AAA"}).status_code == 400
+    assert client.post(form, data={"avg_price": "x", "back": "/security/AAA"}).status_code == 400
+    missing = client.post("/portfolio/securities/999999/avg-cost", data={"avg_price": "1"})
+    assert missing.status_code == 404
+    # aparece en Operaciones y se puede deshacer
+    assert "Ajustes del precio medio" in client.get("/portfolio?tab=operaciones").text
+    client.post(f"/portfolio/cost-adjustments/{adj_id}/delete")
+    with _db() as s:
+        assert portfolio.position_for(s, user.id, sid).avg_cost_eur == pytest.approx(50)

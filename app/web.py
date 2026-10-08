@@ -451,6 +451,7 @@ def watchlist_page(request: Request, session: DbSession, user: WatchlistUser):
 SECURITY_NOTICES = {
     "op": "Operación guardada.",
     "div": "Dividendo guardado.",
+    "avg": "Precio medio actualizado.",
 }
 
 
