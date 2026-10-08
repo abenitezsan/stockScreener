@@ -21,6 +21,7 @@ from app.jobs import latest_fx
 from app.models import (
     DividendEvent,
     DividendPayment,
+    PendingDocument,
     Quote,
     Security,
     Transaction,
@@ -301,6 +302,58 @@ def add_received_dividend(
         net_base=(net * fx_rate).quantize(Decimal("0.01")),
     )
     return add_dividend(session, user_id, security, doc, source)
+
+
+def store_pending(session: Session, user_id: int, result: DocResult, data: bytes) -> None:
+    """Guarda un PDF cuyo ISIN no se reconoce hasta que se asigne su ticker."""
+    import hashlib
+
+    digest = hashlib.sha256(data).hexdigest()
+    if session.scalar(
+        select(PendingDocument.id).where(
+            PendingDocument.user_id == user_id, PendingDocument.sha256 == digest
+        )
+    ):
+        return
+    session.add(
+        PendingDocument(
+            user_id=user_id,
+            isin=result.isin,
+            name=result.name or None,
+            filename=(result.filename or "adjunto.pdf")[:255],
+            sha256=digest,
+            data=data,
+        )
+    )
+    session.commit()
+
+
+def pending_summary(session: Session, user_id: int) -> list[tuple[str, str, int]]:
+    """(ISIN, nombre, nº de documentos) de lo que espera un ticker."""
+    rows = session.execute(
+        select(PendingDocument.isin, func.max(PendingDocument.name), func.count())
+        .where(PendingDocument.user_id == user_id)
+        .group_by(PendingDocument.isin)
+        .order_by(PendingDocument.isin)
+    ).all()
+    return [(isin, name or "", n) for isin, name, n in rows]
+
+
+def process_pending(session: Session, user_id: int, isin: str | None = None) -> list[DocResult]:
+    """Procesa los PDFs pendientes (de un ISIN, o todos) cuyo valor ya se conoce."""
+    query = select(PendingDocument).where(PendingDocument.user_id == user_id)
+    if isin:
+        query = query.where(PendingDocument.isin == isin)
+    results = []
+    for doc in list(session.scalars(query)):
+        if find_security(session, doc.isin) is None:
+            continue
+        result = record_pdf(session, user_id, doc.filename, doc.data)
+        if result.status in ("ok", "duplicate"):
+            session.delete(doc)
+            session.commit()
+        results.append(result)
+    return results
 
 
 def assign_isin(session: Session, isin: str, symbol: str) -> Security:

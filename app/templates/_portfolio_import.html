@@ -1,3 +1,17 @@
+{% if pending %}
+<article class="alert-hard" role="note">
+  <header>Documentos pendientes de ticker</header>
+  <p>Hay PDFs leídos del buzón de valores que aún no conozco. Indica el ticker de Yahoo y se procesarán solos.</p>
+  {% for isin, name, n in pending %}
+  <form method="post" action="{{ ROOT }}/portfolio/isin" class="inline">
+    <span>{{ name or isin }} ({{ isin }}) · {{ n }} documento{{ 's' if n != 1 }}</span>
+    <input type="hidden" name="isin" value="{{ isin }}">
+    <input type="text" name="symbol" placeholder="Ticker de Yahoo (EBRO.MC)" required maxlength="32" pattern="[A-Za-z0-9.\-^=]+">
+    <button type="submit">Asignar</button>
+  </form>
+  {% endfor %}
+</article>
+{% endif %}
 <div class="import-grid">
 <article>
   <h4>PDFs de HeyTrade</h4>
@@ -30,6 +44,16 @@
     <button type="submit">Importar</button>
   </form>
 </article>
+
+{% if mailbox_on %}
+<article class="wide">
+  <h4>Buzón</h4>
+  {% if mailbox.last_run %}<p class="muted">Última revisión: {{ mailbox.last_run.strftime('%d/%m/%Y %H:%M') }} UTC · {{ mailbox.messages }} correos, {{ mailbox.documents }} documentos guardados.
+    {% if mailbox.last_error %}<span class="neg">Error: {{ mailbox.last_error }}</span>{% endif %}</p>
+  {% else %}<p class="muted">Aún no se ha revisado desde el último arranque (se revisa cada pocos minutos).</p>{% endif %}
+  {% if mailbox.log %}<ul>{% for line in mailbox.log %}<li><small>{{ line }}</small></li>{% endfor %}</ul>{% endif %}
+</article>
+{% endif %}
 
 <article class="wide">
   <h4>Añadir compra o venta</h4>

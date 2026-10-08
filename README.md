@@ -54,6 +54,31 @@ Plantillas reconocidas: compra y dividendo nacional (con ejemplos reales). La **
 verificados con un PDF real. Los tests usan el texto de los PDFs sin datos personales
 (`tests/fixtures/heytrade/`).
 
+## Buzón: PDFs de HeyTrade por email
+
+La app puede leer sola, cada 15 minutos, un buzón IMAP al que reenvías los correos de HeyTrade
+(compras, ventas y abonos de dividendos): se guardan con la fecha y los importes del PDF, sin subirlos
+a mano. Se activa solo si defines `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD` y
+`IMAP_ALLOWED_SENDERS` en el `.env` (ver `.env.example`).
+
+1. **Buzón dedicado** (p. ej. GMX gratuito, con IMAP activado en *Ajustes → POP3 e IMAP*).
+2. **Reenvío desde tu Gmail:** *Ajustes → Reenvío* (añadir y confirmar la dirección) y un filtro
+   `from:(remitente de HeyTrade) has:attachment` → «Reenviar a». También sirve reenviar a mano.
+3. **`IMAP_ALLOWED_SENDERS`:** el remitente de HeyTrade y, si reenvías a mano, tu propio Gmail.
+   Un correo solo se acepta si su remitente está en la lista **y** el proveedor del buzón lo
+   autentica: la cabecera `Authentication-Results` de `IMAP_AUTHSERV` (`gmx.net` por defecto) debe
+   dar `dmarc=pass` (o `dkim=pass` alineado) para el dominio del remitente. Los PDFs no van
+   firmados, así que sin esto cualquiera que conociera la dirección podría colar uno falso.
+4. **Qué pasa con cada correo:** se leen sus PDFs, se guardan (los repetidos se ignoran) y el correo
+   queda marcado como leído. Si falla algo transitorio (p. ej. la base de datos), queda sin leer y se
+   reintenta. Si el ISIN no corresponde a ningún valor, el PDF espera en *Cartera → Añadir e
+   importar* a que indiques su ticker y entonces se procesa solo.
+5. **Las operaciones se asignan** a la cuenta `IMAP_TARGET_USER` (por defecto, `SUPERADMIN_EMAIL`).
+
+Prueba manual en el VPS: `docker compose exec stockscreener python -m app.cli mailbox-check`.
+El panel *Cartera → Añadir e importar → Buzón* muestra la última revisión (en memoria: se reinicia
+con la app) y las incidencias; el detalle está en `app.log`.
+
 ## Cuentas de usuario
 
 - El **screener y la ficha de cada valor son públicos**. El **seguimiento** y la **cartera** son

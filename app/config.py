@@ -32,6 +32,22 @@ class Settings(BaseSettings):
     gordon_discount_rate: float = 0.08
     growth_cap: float = 0.05
 
+    # Buzón IMAP del que se leen los PDFs de HeyTrade reenviados (ver README, «Buzón»).
+    # Solo se activa si están definidos host, usuario, contraseña y remitentes permitidos.
+    imap_host: str = ""
+    imap_port: int = 993
+    imap_user: str = ""
+    imap_password: str = ""
+    imap_folder: str = "INBOX"
+    # Email de la cuenta de la app a la que se asignan las operaciones leídas
+    # (por defecto, el superadministrador)
+    imap_target_user: str = ""
+    # Remitentes aceptados, separados por comas: HeyTrade y tu propio Gmail (reenvíos a mano)
+    imap_allowed_senders: str = ""
+    # Identificador (authserv-id) de la cabecera Authentication-Results de tu proveedor
+    imap_authserv: str = "gmx.net"
+    imap_interval_minutes: int = 15
+
     # Descarga de datos
     # Caché de yfinance (cookies de sesión con Yahoo y zonas horarias). Sin ella, yfinance se
     # vuelve a autenticar en cada petición. En Docker: /data/.cache (persiste entre reinicios).

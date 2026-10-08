@@ -9,7 +9,7 @@ from collections.abc import Callable
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy.orm import Session
 
-from app import jobs
+from app import jobs, mailbox
 from app.config import get_settings
 from app.db import SessionLocal
 
@@ -50,4 +50,12 @@ def create_scheduler() -> BackgroundScheduler:
     )
     # Cuentas anuales (cambian como mucho trimestralmente)
     scheduler.add_job(_run(jobs.weekly), "cron", day_of_week="sat", hour=10, id="weekly")
+    # Buzón IMAP con los PDFs reenviados de HeyTrade (si está configurado)
+    if mailbox.configured():
+        scheduler.add_job(
+            _run(mailbox.run_poll),
+            "interval",
+            minutes=max(get_settings().imap_interval_minutes, 1),
+            id="mailbox",
+        )
     return scheduler

@@ -17,7 +17,7 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 
-from app import heytrade, portfolio
+from app import heytrade, mailbox, portfolio
 from app.config import get_settings, today
 from app.jobs import latest_fx
 from app.models import DividendPayment, Security, Transaction
@@ -86,6 +86,10 @@ def _page(
     if tab == "fiscal":
         ctx["years"] = portfolio.tax_summary(session, user.id)
         ctx["imported_dividends"] = portfolio.imported_dividends_eur(session, user.id)
+    if tab == "importar":
+        ctx["pending"] = portfolio.pending_summary(session, user.id)
+        ctx["mailbox_on"] = mailbox.configured()
+        ctx["mailbox"] = mailbox.STATUS
     if tab == "operaciones":
         ctx["transactions"] = session.execute(
             select(Transaction, Security)
@@ -153,14 +157,14 @@ def set_isin(
         return _page(request, session, user, "importar", errors=[str(exc)], status=400)
     if security.price_currency is None:  # valor nuevo: faltan ficha, histórico y cotización
         background.add_task(portfolio.fetch_market_data, security.symbol)
-    return _page(
-        request,
-        session,
-        user,
-        "importar",
-        notice=f"{isin.strip().upper()} asignado a {security.symbol}. Vuelve a subir los PDFs "
-        "pendientes (los ya cargados se ignoran). Los datos de mercado tardan un minuto.",
-    )
+    # Los PDFs que esperaban este ticker (p. ej. los del buzón) se procesan ya
+    results = portfolio.process_pending(session, user.id, isin.strip().upper())
+    notice = f"{isin.strip().upper()} asignado a {security.symbol}."
+    if results:
+        notice += f" Se han procesado {len(results)} documentos pendientes."
+    else:
+        notice += " Si tienes PDFs de este valor, vuelve a subirlos."
+    return _page(request, session, user, "importar", results=results, notice=notice)
 
 
 @router.post("/portfolio/positions", response_class=HTMLResponse)
