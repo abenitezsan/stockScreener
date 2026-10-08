@@ -129,6 +129,27 @@ def test_extract_pdfs_ignores_other_attachments():
     assert [n for n, _ in mailbox.extract_pdfs(parsed)] == ["a.pdf", "d.pdf"]
 
 
+def test_real_heytrade_forward_structure():
+    """Estructura de un reenvío real: multipart/mixed = (alternative texto/html) + PDF adjunto."""
+    from email import message_from_bytes, policy
+
+    msg = EmailMessage()
+    msg["Authentication-Results"] = AUTH_GMAIL
+    msg["From"] = f"Alguien <{ME}>"
+    msg["Subject"] = "Fwd: HeyTrade: Confirmación de evento financiero"
+    msg.set_content("---------- Forwarded message ---------\nDe: Heytrade <noreply@heytrade.com>")
+    msg.add_alternative("<div>Adjunta a este correo…</div>", subtype="html")
+    msg.add_attachment(
+        b"%PDF-1.4 evento",
+        maintype="application",
+        subtype="pdf",
+        filename="corporate_action_dc089a65-2838-4586-869e-dd098fff3870.pdf",
+    )
+    parsed = message_from_bytes(msg.as_bytes(), policy=policy.default)
+    assert mailbox.check_sender(parsed) == ME
+    assert [n[:16] for n, _ in mailbox.extract_pdfs(parsed)] == ["corporate_action"]
+
+
 # --- Flujo completo -----------------------------------------------------------------------
 
 

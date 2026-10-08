@@ -63,7 +63,7 @@ a mano. Se activa solo si defines `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD` y
 
 1. **Buzón dedicado** (p. ej. GMX gratuito, con IMAP activado en *Ajustes → POP3 e IMAP*).
 2. **Reenvío desde tu Gmail:** *Ajustes → Reenvío* (añadir y confirmar la dirección) y un filtro
-   `from:(remitente de HeyTrade) has:attachment` → «Reenviar a». También sirve reenviar a mano.
+   `from:(noreply@heytrade.com) has:attachment` → «Reenviar a». También sirve reenviar a mano.
 3. **`IMAP_ALLOWED_SENDERS`:** el remitente de HeyTrade y, si reenvías a mano, tu propio Gmail.
    Un correo solo se acepta si su remitente está en la lista **y** el proveedor del buzón lo
    autentica: la cabecera `Authentication-Results` de `IMAP_AUTHSERV` (`gmx.net` por defecto) debe
