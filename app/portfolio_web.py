@@ -18,7 +18,7 @@ from fastapi import (
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 
-from app import heytrade, portfolio
+from app import heytrade, mailbox, portfolio
 from app.config import get_settings, today
 from app.jobs import latest_fx
 from app.models import Contribution, DcaPlan, DividendPayment, Security, Transaction
@@ -59,6 +59,27 @@ def _back(value: str | None) -> str:
     return "/portfolio?tab=operaciones"
 
 
+def _div_chart(cal) -> list[dict]:
+    """Columnas SVG (viewBox 600x200) de la ventana: cobrado (macizo) y pendiente (claro)."""
+    top = max((m.total for m in cal.months), default=0.0) or 1.0
+    plot = 150.0  # alto útil
+    out = []
+    for i, m in enumerate(cal.months):
+        got, pend = m.received_gross / top * plot, m.pending / top * plot
+        out.append(
+            {
+                "x": 8 + i * 49,
+                "got_h": got,
+                "got_y": 170 - got,
+                "pend_h": pend,
+                "pend_y": 170 - got - pend,
+                "label_y": 170 - got - pend - 4,
+                "m": m,
+            }
+        )
+    return out
+
+
 def _chart(snaps) -> dict | None:
     """Puntos SVG (viewBox 600x180) de lo aportado y del valor; None si hay menos de 2 fotos."""
     if len(snaps) < 2:
@@ -83,27 +104,6 @@ def _chart(snaps) -> dict | None:
         "first": snaps[0].day,
         "last": snaps[-1].day,
     }
-
-
-def _div_chart(cal) -> list[dict]:
-    """Columnas SVG (viewBox 600x200) de la ventana: cobrado (macizo) y pendiente (claro)."""
-    top = max((m.total for m in cal.months), default=0.0) or 1.0
-    plot = 150.0  # alto útil
-    out = []
-    for i, m in enumerate(cal.months):
-        got, pend = m.received_gross / top * plot, m.pending / top * plot
-        out.append(
-            {
-                "x": 8 + i * 49,
-                "got_h": got,
-                "got_y": 170 - got,
-                "pend_h": pend,
-                "pend_y": 170 - got - pend,
-                "label_y": 170 - got - pend - 4,
-                "m": m,
-            }
-        )
-    return out
 
 
 def _page(
@@ -157,13 +157,19 @@ def _page(
         ctx["by_currency"] = portfolio.allocation(open_rows, lambda p: p.security.currency)
     if tab == "dividendos":
         ctx["projection"] = portfolio.project_dividends(session, open_rows)
-        ctx["received"] = [y for y in portfolio.tax_summary(session, user.id)]
+        ctx["received"] = portfolio.tax_summary(session, user.id)
+        ctx["imported_dividends"] = portfolio.imported_dividends_eur(session, user.id)
         ctx["calendar"] = cal = portfolio.dividend_calendar(
             session, user.id, ctx["projection"], start
         )
         ctx["div_chart"] = _div_chart(cal)
     if tab == "fiscal":
         ctx["years"] = portfolio.tax_summary(session, user.id)
+        ctx["imported_dividends"] = portfolio.imported_dividends_eur(session, user.id)
+    if tab == "importar":
+        ctx["pending"] = portfolio.pending_summary(session, user.id)
+        ctx["mailbox_on"] = mailbox.configured()
+        ctx["mailbox"] = mailbox.STATUS
     if tab == "operaciones":
         ctx["transactions"] = session.execute(
             select(Transaction, Security)
@@ -191,7 +197,9 @@ def portfolio_page(
 ):
     notice = {
         "op": "Operación guardada.",
-        "div": "Dividendo guardado.",
+        "pos": "Posición eliminada.",
+        "contrib": "Aportación guardada.",
+        "dca": "DCA guardado.",
         "deleted": "Eliminado.",
         "isin": "ISIN asignado.",
     }.get(done, "")
@@ -235,14 +243,14 @@ def set_isin(
         return _page(request, session, user, "importar", errors=[str(exc)], status=400)
     if security.price_currency is None:  # valor nuevo: faltan ficha, histórico y cotización
         background.add_task(portfolio.fetch_market_data, security.symbol)
-    return _page(
-        request,
-        session,
-        user,
-        "importar",
-        notice=f"{isin.strip().upper()} asignado a {security.symbol}. Vuelve a subir los PDFs "
-        "pendientes (los ya cargados se ignoran). Los datos de mercado tardan un minuto.",
-    )
+    # Los PDFs que esperaban este ticker (p. ej. los del buzón) se procesan ya
+    results = portfolio.process_pending(session, user.id, isin.strip().upper())
+    notice = f"{isin.strip().upper()} asignado a {security.symbol}."
+    if results:
+        notice += f" Se han procesado {len(results)} documentos pendientes."
+    else:
+        notice += " Si tienes PDFs de este valor, vuelve a subirlos."
+    return _page(request, session, user, "importar", results=results, notice=notice)
 
 
 @router.post("/portfolio/positions", response_class=HTMLResponse)
@@ -267,7 +275,7 @@ def import_positions(
             errors=errors or ["No hay ninguna posición que importar"],
             status=400,
         )
-    for sec, shares, avg in rows:
+    for sec, shares, avg, dividends in rows:
         try:
             portfolio.add_transaction(
                 session,
@@ -281,6 +289,17 @@ def import_positions(
                 source="import",
                 notes="Posición importada",
             )
+            if dividends > 0:
+                portfolio.add_received_dividend(
+                    session,
+                    user.id,
+                    sec,
+                    pay_date=day,
+                    shares=shares,
+                    gross=dividends,
+                    currency=get_settings().base_currency,
+                    source="import",
+                )
         except portfolio.PortfolioError as exc:
             session.rollback()
             errors.append(f"{sec.symbol}: {exc}")
@@ -390,14 +409,12 @@ def add_manual_dividend(
     user: PortfolioUser,
     ident: str = Form(...),
     pay_date: str = Form(...),
-    ex_date: str = Form(""),
     shares: str = Form(...),
     gross: str = Form(...),
     currency: str = Form(""),
-    fx_rate: str = Form(""),
     withholding_origin: str = Form("0"),
     withholding_domestic: str = Form("0"),
-    fees: str = Form("0"),
+    fx_rate: str = Form(""),
     back: str = Form(""),
 ):
     try:
@@ -405,44 +422,28 @@ def add_manual_dividend(
         if sec is None:
             raise portfolio.PortfolioError(f"«{ident.strip()}» no está en el universo")
         try:
-            pay = date.fromisoformat(pay_date)
-            ex = date.fromisoformat(ex_date) if ex_date.strip() else None
+            day = date.fromisoformat(pay_date)
         except ValueError:
             raise portfolio.PortfolioError("Fecha no válida") from None
-        cur = (currency or sec.currency or get_settings().base_currency).strip().upper()
-        base = get_settings().base_currency
-        if cur == base:
-            fx = Decimal(1)
-        elif fx_rate.strip():
-            fx = _number(fx_rate, "Tipo de cambio")
-        else:
-            rate = latest_fx(session).get(cur)
-            if rate is None:
-                raise portfolio.PortfolioError(f"Indica el tipo de cambio {cur}→{base}")
-            fx = Decimal(str(rate))
-        portfolio.add_manual_dividend(
+        portfolio.add_received_dividend(
             session,
             user.id,
             sec,
-            pay_date=pay,
-            ex_date=ex,
+            pay_date=day,
             shares=_number(shares, "Acciones"),
-            gross=_number(gross, "Importe bruto"),
-            currency=cur,
-            fx_rate=fx,
+            gross=_number(gross, "Bruto"),
+            currency=currency.strip() or None,
             withholding_origin=_number(withholding_origin or "0", "Retención en origen"),
             withholding_domestic=_number(withholding_domestic or "0", "Retención en destino"),
-            fees=_number(fees or "0", "Gastos"),
+            fx_rate=_number(fx_rate, "Tipo de cambio") if fx_rate.strip() else None,
         )
     except (portfolio.PortfolioError, InvalidOperation) as exc:
         session.rollback()
         tab = "posiciones" if _back(back).startswith("/portfolio?tab=posiciones") else "importar"
         return _page(request, session, user, tab, errors=[str(exc)], status=400)
     target = _back(back)
-    if target == "/portfolio?tab=operaciones":
-        target = "/portfolio?tab=dividendos"
     sep = "&" if "?" in target else "?"
-    return RedirectResponse(f"{ROOT}{target}{sep}done=div", status_code=303)
+    return RedirectResponse(f"{ROOT}{target}{sep}done=op", status_code=303)
 
 
 @router.post("/portfolio/securities/{security_id}/delete")

@@ -23,6 +23,7 @@ from app.models import (
     DcaPlan,
     DividendEvent,
     DividendPayment,
+    PendingDocument,
     PortfolioSnapshot,
     Quote,
     Security,
@@ -146,7 +147,12 @@ def manual_total_eur(
 
 
 def add_dividend(
-    session: Session, user_id: int, security: Security, doc: heytrade.DividendDoc, source: str
+    session: Session,
+    user_id: int,
+    security: Security,
+    doc: heytrade.DividendDoc,
+    source: str,
+    commit: bool = True,
 ) -> DividendPayment:
     if doc.external_id and session.scalar(
         select(DividendPayment.id).where(
@@ -190,74 +196,6 @@ def add_dividend(
         net_base=net_base,
         source=source,
         external_id=doc.external_id or None,
-    )
-    session.add(pay)
-    session.commit()
-    return pay
-
-
-def add_manual_dividend(
-    session: Session,
-    user_id: int,
-    security: Security,
-    *,
-    pay_date: date,
-    shares: Decimal,
-    gross: Decimal,
-    currency: str,
-    fx_rate: Decimal,
-    ex_date: date | None = None,
-    withholding_origin: Decimal = ZERO,
-    withholding_domestic: Decimal = ZERO,
-    fees: Decimal = ZERO,
-    net: Decimal | None = None,
-    notes: str | None = None,
-    commit: bool = True,
-) -> DividendPayment:
-    """Alta a mano de un dividendo cobrado (por si falla la importación del PDF).
-
-    Importes en la divisa del dividendo; el neto en EUR se calcula con el cambio indicado.
-    Si no se da el neto, es bruto menos retenciones y gastos.
-    """
-    if shares <= 0 or gross <= 0:
-        raise PortfolioError("Acciones e importe bruto deben ser positivos")
-    if min(withholding_origin, withholding_domestic, fees) < 0 or fx_rate <= 0:
-        raise PortfolioError("Retenciones, gastos y tipo de cambio no pueden ser negativos")
-    if pay_date > today():
-        raise PortfolioError("La fecha de pago no puede ser futura")
-    if ex_date and ex_date > pay_date:
-        raise PortfolioError("La fecha ex-dividendo es posterior al pago")
-    withheld = withholding_origin + withholding_domestic + fees
-    net = gross - withheld if net is None else net
-    if net < 0 or withheld > gross:
-        raise PortfolioError("Las retenciones y gastos superan el bruto")
-    if session.scalar(
-        select(DividendPayment.id).where(
-            DividendPayment.user_id == user_id,
-            DividendPayment.security_id == security.id,
-            DividendPayment.pay_date == pay_date,
-            DividendPayment.shares == shares,
-            DividendPayment.gross == gross,
-        )
-    ):
-        raise DuplicateError("Ya hay un dividendo igual")
-    pay = DividendPayment(
-        user_id=user_id,
-        security_id=security.id,
-        ex_date=ex_date,
-        pay_date=pay_date,
-        shares=shares,
-        per_share=(gross / shares).quantize(Decimal("0.00000001")),
-        currency=currency,
-        gross=gross,
-        withholding_origin=withholding_origin,
-        withholding_domestic=withholding_domestic,
-        withholding_rate=(withheld / gross).quantize(Decimal("0.0001")) if withheld else None,
-        fees=fees,
-        fx_rate=fx_rate,
-        net_base=(net * fx_rate).quantize(Decimal("0.01")),
-        source="manual",
-        notes=(notes or None),
     )
     session.add(pay)
     if commit:
@@ -326,7 +264,7 @@ def add_dividend_history(
             shares, gross, w_orig, w_dom, fees, line_fx = nums
             if shares is None or gross is None:
                 raise PortfolioError("faltan acciones o importe bruto")
-            add_manual_dividend(
+            add_received_dividend(
                 session,
                 user_id,
                 security,
@@ -587,6 +525,114 @@ def record_pdf(session: Session, user_id: int, filename: str, data: bytes) -> Do
         return DocResult(filename, status, f"{security.symbol}: {exc}", doc.isin)
 
 
+def add_received_dividend(
+    session: Session,
+    user_id: int,
+    security: Security,
+    *,
+    pay_date: date,
+    shares: Decimal,
+    gross: Decimal,
+    currency: str | None = None,
+    withholding_origin: Decimal = ZERO,
+    withholding_domestic: Decimal = ZERO,
+    fx_rate: Decimal | None = None,
+    ex_date: date | None = None,
+    fees: Decimal = ZERO,
+    source: str = "manual",
+    commit: bool = True,
+) -> DividendPayment:
+    """Dividendo ya cobrado, a mano o importado junto a una posición (bruto y retenciones)."""
+    base = get_settings().base_currency
+    cur = (currency or security.currency or base).upper()
+    if gross <= 0 or shares <= 0 or min(withholding_origin, withholding_domestic, fees) < 0:
+        raise PortfolioError("Acciones y bruto deben ser positivos y las retenciones no negativas")
+    if ex_date and ex_date > pay_date:
+        raise PortfolioError("La fecha ex-dividendo es posterior al pago")
+    if withholding_origin + withholding_domestic + fees > gross:
+        raise PortfolioError("Las retenciones no pueden superar el bruto")
+    if pay_date > today():
+        raise PortfolioError("La fecha de cobro no puede ser futura")
+    if cur == base:
+        fx_rate = Decimal(1)
+    elif fx_rate is None:
+        rate = latest_fx(session).get(cur)
+        if rate is None:
+            raise PortfolioError(f"Indica el tipo de cambio {cur}→{base}")
+        fx_rate = Decimal(str(rate))
+    net = gross - withholding_origin - withholding_domestic - fees
+    doc = heytrade.DividendDoc(
+        isin=security.isin or "",
+        name=security.name or "",
+        currency=cur,
+        per_share=(gross / shares).quantize(Decimal("0.000001")),
+        ex_date=ex_date,
+        pay_date=pay_date,
+        shares=shares,
+        gross=gross,
+        withholding_origin=withholding_origin,
+        withholding_domestic=withholding_domestic,
+        withholding_rate=None,
+        fees=fees,
+        net=net,
+        fx_rate=fx_rate,
+        net_base=(net * fx_rate).quantize(Decimal("0.01")),
+    )
+    return add_dividend(session, user_id, security, doc, source, commit)
+
+
+def store_pending(session: Session, user_id: int, result: DocResult, data: bytes) -> None:
+    """Guarda un PDF cuyo ISIN no se reconoce hasta que se asigne su ticker."""
+    import hashlib
+
+    digest = hashlib.sha256(data).hexdigest()
+    if session.scalar(
+        select(PendingDocument.id).where(
+            PendingDocument.user_id == user_id, PendingDocument.sha256 == digest
+        )
+    ):
+        return
+    session.add(
+        PendingDocument(
+            user_id=user_id,
+            isin=result.isin,
+            name=result.name or None,
+            filename=(result.filename or "adjunto.pdf")[:255],
+            sha256=digest,
+            data=data,
+        )
+    )
+    session.commit()
+
+
+def pending_summary(session: Session, user_id: int) -> list[tuple[str, str, int]]:
+    """(ISIN, nombre, nº de documentos) de lo que espera un ticker."""
+    rows = session.execute(
+        select(PendingDocument.isin, func.max(PendingDocument.name), func.count())
+        .where(PendingDocument.user_id == user_id)
+        .group_by(PendingDocument.isin)
+        .order_by(PendingDocument.isin)
+    ).all()
+    return [(isin, name or "", n) for isin, name, n in rows]
+
+
+def process_pending(session: Session, user_id: int, isin: str | None = None) -> list[DocResult]:
+    """Procesa los PDFs pendientes (de un ISIN, o todos) cuyo valor ya se conoce."""
+    query = select(PendingDocument).where(PendingDocument.user_id == user_id)
+    if isin:
+        query = query.where(PendingDocument.isin == isin)
+    results = []
+    for doc in list(session.scalars(query)):
+        if find_security(session, doc.isin) is None:
+            continue
+        result = record_pdf(session, user_id, doc.filename, doc.data)
+        if result.status in ("ok", "duplicate"):
+            session.delete(doc)
+            session.commit()
+        results.append(result)
+    return results
+
+
 def assign_isin(session: Session, isin: str, symbol: str) -> Security:
     """Enlaza un ISIN con un ticker de Yahoo; si el valor no existe, lo da de alta."""
     from app import universe
@@ -629,9 +675,10 @@ def fetch_market_data(symbol: str) -> None:
 
 
 def parse_positions(session: Session, text: str) -> tuple[list[tuple], list[str]]:
-    """Posiciones pegadas, una por línea: `ticker o ISIN; acciones; coste medio en EUR`.
+    """Posiciones pegadas, una por línea: `ticker o ISIN; acciones; coste medio en EUR` y,
+    opcionalmente, `; dividendos ya cobrados (bruto, EUR, acumulado)`.
 
-    Devuelve las filas válidas (valor, acciones, coste medio) y los errores por línea.
+    Devuelve las filas válidas (valor, acciones, coste medio, dividendos) y los errores por línea.
     """
     rows, errors = [], []
     for n, line in enumerate(text.splitlines(), 1):
@@ -640,8 +687,10 @@ def parse_positions(session: Session, text: str) -> tuple[list[tuple], list[str]
         parts = [p.strip() for p in re.split(r"[;\t]|(?<=\S),(?=\s)|\s{2,}", line.strip()) if p]
         if len(parts) == 1:
             parts = line.split()
-        if len(parts) != 3:
-            errors.append(f"Línea {n}: se esperan 3 columnas (ticker, acciones, coste medio)")
+        if len(parts) not in (3, 4):
+            errors.append(
+                f"Línea {n}: se esperan 3 o 4 columnas (ticker, acciones, coste medio, dividendos)"
+            )
             continue
         sec = find_security(session, parts[0])
         if sec is None:
@@ -651,13 +700,14 @@ def parse_positions(session: Session, text: str) -> tuple[list[tuple], list[str]
             continue
         try:
             shares, avg = heytrade.parse_number(parts[1]), heytrade.parse_number(parts[2])
+            dividends = heytrade.parse_number(parts[3]) if len(parts) == 4 else ZERO
         except heytrade.ParseError:
             errors.append(f"Línea {n}: número no válido")
             continue
-        if shares <= 0 or avg <= 0:
+        if shares <= 0 or avg <= 0 or dividends < 0:
             errors.append(f"Línea {n}: acciones y coste medio deben ser positivos")
             continue
-        rows.append((sec, shares, avg))
+        rows.append((sec, shares, avg, dividends))
     return rows, errors
 
 
@@ -963,7 +1013,12 @@ def dividend_calendar(
     now = today()
     now_idx = now.year * 12 + now.month - 1
     received: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0])
-    for pay in session.scalars(select(DividendPayment).where(DividendPayment.user_id == user_id)):
+    for pay in session.scalars(
+        select(DividendPayment).where(
+            DividendPayment.user_id == user_id,
+            DividendPayment.source != "import",  # sin fecha real de cobro: no entran por mes
+        )
+    ):
         bucket = received[pay.pay_date.year * 12 + pay.pay_date.month - 1]
         bucket[0] += float(pay.gross * pay.fx_rate)
         bucket[1] += float(pay.net_base)
@@ -1029,7 +1084,7 @@ def tax_summary(session: Session, user_id: int) -> list[TaxYear]:
     payments = session.execute(
         select(DividendPayment, Security)
         .join(Security, Security.id == DividendPayment.security_id)
-        .where(DividendPayment.user_id == user_id)
+        .where(DividendPayment.user_id == user_id, DividendPayment.source != "import")
         .order_by(DividendPayment.pay_date)
     ).all()
     for pay, sec in payments:
@@ -1057,6 +1112,20 @@ def tax_summary(session: Session, user_id: int) -> list[TaxYear]:
         c["origin"] += row.origin_eur
         c["domestic"] += row.domestic_eur
     return sorted(years.values(), key=lambda y: -y.year)
+
+
+def imported_dividends_eur(session: Session, user_id: int) -> float:
+    """Dividendos cobrados antes de empezar a usar la app (importados con la posición), en EUR.
+
+    Cuentan en el total return, pero no entran en el resumen fiscal: no se sabe en qué año se
+    cobraron ni sus retenciones.
+    """
+    total = session.scalar(
+        select(func.sum(DividendPayment.net_base)).where(
+            DividendPayment.user_id == user_id, DividendPayment.source == "import"
+        )
+    )
+    return float(total or 0)
 
 
 def position_for(session: Session, user_id: int, security_id: int) -> Position | None:

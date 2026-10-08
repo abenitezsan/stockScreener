@@ -47,7 +47,7 @@ class DividendDoc:
     isin: str
     name: str
     currency: str
-    per_share: Decimal
+    per_share: Decimal | None
     ex_date: date | None
     pay_date: date
     shares: Decimal

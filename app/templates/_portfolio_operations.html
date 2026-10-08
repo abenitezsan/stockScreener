@@ -17,7 +17,7 @@
     <td>{{ d.pay_date.strftime('%d/%m/%Y') }}</td><td><a href="{{ ROOT }}/security/{{ sec.symbol }}">{{ sec.symbol }}</a></td>
     <td class="num">{{ d.shares | fmt('qty') }}</td><td class="num">{{ d.gross | fmt }} {{ d.currency }}</td>
     <td class="num">{{ (d.withholding_origin + d.withholding_domestic) | fmt }}</td><td class="num">{{ d.net_base | fmt('eur') }}</td>
-    <td>{{ 'PDF' if d.source == 'pdf' else 'Manual' }}</td>
+    <td>{{ {'pdf': 'PDF', 'import': 'Importado'}.get(d.source, 'Manual') }}</td>
     <td><form method="post" action="{{ ROOT }}/portfolio/dividends/{{ d.id }}/delete" onsubmit="return confirm('¿Borrar este dividendo?')"><button class="danger" type="submit">Borrar</button></form></td>
   </tr>{% else %}<tr><td colspan="8">Sin dividendos.</td></tr>{% endfor %}</tbody>
 </table></div>
