@@ -19,6 +19,8 @@
 {% if user %}
 <section class="my-position">
   <h4>Mi posición</h4>
+  {% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+  {% if errors %}<article class="alert-hard" role="alert"><ul>{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul></article>{% endif %}
   {% if position %}{% set q = position %}
   <div class="cards">
     <article><div class="label">Acciones</div><div class="value">{{ q.shares | fmt('qty') }}</div></article>
@@ -37,7 +39,15 @@
   <details><summary>Añadir dividendo cobrado</summary>
     {% with sec_symbol=sec.symbol, sec_currency=sec.currency %}{% include "_portfolio_div_form.html" %}{% endwith %}
   </details>
-  {% if position %}<p><small><a href="{{ ROOT }}/portfolio">Ver toda la cartera</a></small></p>{% endif %}
+  <details><summary>Cargar histórico de dividendos</summary>
+    {% with sec_symbol=sec.symbol, sec_currency=sec.currency, back_to='/security/' ~ sec.symbol %}{% include "_portfolio_div_history_form.html" %}{% endwith %}
+  </details>
+  {% if position %}
+  <details class="danger-zone"><summary>Eliminar posición</summary>
+    <p class="muted"><small>Borra de golpe todas las operaciones de {{ sec.symbol }} (y sus dividendos, salvo que los conserves) sin validar ni recalcular nada. Lo que hayas aportado no cambia.</small></p>
+    {% with sec_id=sec.id, sec_symbol=sec.symbol %}{% include "_portfolio_delete_position.html" %}{% endwith %}
+  </details>
+  <p><small><a href="{{ ROOT }}/portfolio">Ver toda la cartera</a></small></p>{% endif %}
 </section>
 {% endif %}
 

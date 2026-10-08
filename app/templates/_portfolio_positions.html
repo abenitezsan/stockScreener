@@ -43,20 +43,11 @@
         {% elif ld.change is not none and ld.change < -0.0005 %}<span class="neg" title="Baja {{ (-ld.change) | fmt('pct') }}">▼ {{ (-ld.change) | fmt('pct') }}</span>
         {% elif ld.change is not none %}<span class="muted">=</span>{% endif %}{% else %}–{% endif %}</td>
     </tr>
-    <tr class="row-extra"><td colspan="11">
-      <details><summary><small>Añadir dividendo cobrado de {{ sec.symbol }}</small></summary>
-        {% with sec_symbol=sec.symbol, sec_currency=sec.currency, back_to='/portfolio?tab=posiciones' %}{% include "_portfolio_div_form.html" %}{% endwith %}
-      </details>
-      <details><summary><small>Cargar histórico de dividendos de {{ sec.symbol }}</small></summary>
-        {% with sec_symbol=sec.symbol, sec_currency=sec.currency, back_to='/portfolio?tab=posiciones' %}{% include "_portfolio_div_history_form.html" %}{% endwith %}
-      </details>
-      {% with p=p %}{% include "_portfolio_delete_position.html" %}{% endwith %}
-    </td></tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
-<p class="muted"><small>Último dividendo: fecha ex-dividendo e importe por acción en la divisa del valor, con la variación frente al anterior (Yahoo no da la fecha de anuncio). YOC = dividendo anual a cambio actual ÷ coste de la posición.</small></p>
+<p class="muted"><small>Pulsa un valor para ver su detalle y gestionar su posición (añadir dividendos, cargar histórico, eliminarla). Último dividendo: fecha ex-dividendo e importe por acción en la divisa del valor, con la variación frente al anterior (Yahoo no da la fecha de anuncio). YOC = dividendo anual a cambio actual ÷ coste de la posición.</small></p>
 
 <div class="charts">
   {% for title, data in [('Por sector', by_sector), ('Por país', by_country), ('Por divisa', by_currency)] %}
@@ -71,11 +62,10 @@
 
 {% if closed %}
 <details><summary>Posiciones cerradas ({{ closed | length }})</summary>
-<table><thead><tr><th>Valor</th><th class="num">Resultado vendido</th><th class="num">Dividendos (bruto)</th><th class="num">Total return</th><th></th></tr></thead><tbody>
+<table><thead><tr><th>Valor</th><th class="num">Resultado vendido</th><th class="num">Dividendos (bruto)</th><th class="num">Total return</th></tr></thead><tbody>
   {% for p in closed %}<tr><td><a href="{{ ROOT }}/security/{{ p.security.symbol }}">{{ p.security.symbol }}</a></td>
     <td class="num {{ p.realized_eur | gain }}">{{ p.realized_eur | fmt('seur') }}</td><td class="num">{{ p.dividends_gross_eur | fmt('eur') }}</td>
-    <td class="num {{ (p.realized_eur + p.dividends_gross_eur) | gain }}">{{ (p.realized_eur + p.dividends_gross_eur) | fmt('seur') }}</td>
-    <td>{% include "_portfolio_delete_position.html" %}</td></tr>{% endfor %}
+    <td class="num {{ (p.realized_eur + p.dividends_gross_eur) | gain }}">{{ (p.realized_eur + p.dividends_gross_eur) | fmt('seur') }}</td></tr>{% endfor %}
 </tbody></table></details>
 {% endif %}
 {% endif %}

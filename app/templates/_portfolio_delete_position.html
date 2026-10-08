@@ -1,5 +1,5 @@
-<form method="post" action="{{ ROOT }}/portfolio/securities/{{ p.security.id }}/delete" class="inline"
-      onsubmit="return confirm('¿Eliminar la posición de {{ p.security.symbol }}? Se borran todas sus operaciones y dividendos (salvo que marques conservarlos) sin recalcular nada más.')">
+<form method="post" action="{{ ROOT }}/portfolio/securities/{{ sec_id }}/delete" class="inline"
+      onsubmit="return confirm('¿Eliminar la posición de {{ sec_symbol }}? Se borran todas sus operaciones y dividendos (salvo que marques conservarlos), sin recalcular nada más.')">
   <label><input type="checkbox" name="keep_dividends" value="1"> conservar dividendos</label>
   <button class="danger" type="submit">Eliminar posición</button>
 </form>
