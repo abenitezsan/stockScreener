@@ -12,15 +12,18 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import heytrade
 from app.config import get_settings, today
 from app.jobs import latest_fx
 from app.models import (
+    Contribution,
+    DcaPlan,
     DividendEvent,
     DividendPayment,
+    PortfolioSnapshot,
     Quote,
     Security,
     Transaction,
@@ -209,6 +212,7 @@ def add_manual_dividend(
     fees: Decimal = ZERO,
     net: Decimal | None = None,
     notes: str | None = None,
+    commit: bool = True,
 ) -> DividendPayment:
     """Alta a mano de un dividendo cobrado (por si falla la importación del PDF).
 
@@ -256,8 +260,269 @@ def add_manual_dividend(
         notes=(notes or None),
     )
     session.add(pay)
-    session.commit()
+    if commit:
+        session.commit()
     return pay
+
+
+def _date(text: str) -> date:
+    text = text.strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            return date.fromisoformat(text)
+        d, m, y = re.split(r"[/.\-]", text)
+        return date(int(y) + 2000 if len(y) == 2 else int(y), int(m), int(d))
+    except ValueError:
+        raise PortfolioError(f"Fecha no válida: {text!r}") from None
+
+
+def add_dividend_history(
+    session: Session,
+    user_id: int,
+    security: Security,
+    text: str,
+    *,
+    currency: str,
+    fx_rate: Decimal | None,
+) -> tuple[int, int, list[str]]:
+    """Carga de golpe el histórico de dividendos cobrados de un valor.
+
+    Una línea por pago: `fecha de pago; acciones; bruto[; ret. origen; ret. destino; gastos;
+    cambio a €]` (los importes en la divisa del dividendo). Todo o nada: si una línea falla no se
+    guarda ninguna. Los pagos que ya existían se saltan. Devuelve (añadidos, repetidos, errores).
+    """
+    base = get_settings().base_currency
+    cur = (currency or security.currency or base).strip().upper()
+    default_fx = ZERO
+    if cur == base:
+        default_fx = Decimal(1)
+    elif fx_rate:
+        default_fx = fx_rate
+    else:
+        rate = latest_fx(session).get(cur)
+        if rate is None:
+            return 0, 0, [f"Indica el tipo de cambio {cur}→{base}"]
+        default_fx = Decimal(str(rate))
+    added = skipped = 0
+    errors: list[str] = []
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        cells = [c.strip() for c in re.split(r"[;\t]", line)]
+        if n == 1 and cells[0].lower().startswith(("fecha", "date")):
+            continue
+        try:
+            if not 3 <= len(cells) <= 7:
+                raise PortfolioError("usa «fecha; acciones; bruto» y, opcional, retenciones/gastos")
+            nums = []
+            for label, cell in zip(
+                ("Acciones", "Bruto", "Ret. origen", "Ret. destino", "Gastos", "Cambio"),
+                cells[1:],
+                strict=False,
+            ):
+                nums.append(heytrade.parse_number(cell) if cell else None)
+            nums += [None] * (6 - len(nums))
+            shares, gross, w_orig, w_dom, fees, line_fx = nums
+            if shares is None or gross is None:
+                raise PortfolioError("faltan acciones o importe bruto")
+            add_manual_dividend(
+                session,
+                user_id,
+                security,
+                pay_date=_date(cells[0]),
+                shares=shares,
+                gross=gross,
+                currency=cur,
+                fx_rate=Decimal(1) if cur == base else (line_fx or default_fx),
+                withholding_origin=w_orig or ZERO,
+                withholding_domestic=w_dom or ZERO,
+                fees=fees or ZERO,
+                commit=False,
+            )
+            added += 1
+        except DuplicateError:
+            skipped += 1
+        except (PortfolioError, heytrade.ParseError) as exc:
+            errors.append(f"Línea {n}: {exc}")
+    if errors:
+        session.rollback()
+        return 0, 0, errors
+    session.commit()
+    return added, skipped, []
+
+
+def delete_position(
+    session: Session, user_id: int, security_id: int, *, keep_dividends: bool = False
+) -> tuple[int, int]:
+    """Borra de golpe las operaciones (y los dividendos) de un valor del usuario.
+
+    No simula ni recalcula nada: son borrados directos. Lo aportado (`Contribution`) no se toca.
+    Devuelve (operaciones, dividendos) borrados.
+    """
+    txs = session.execute(
+        delete(Transaction).where(
+            Transaction.user_id == user_id, Transaction.security_id == security_id
+        )
+    ).rowcount
+    divs = 0
+    if not keep_dividends:
+        divs = session.execute(
+            delete(DividendPayment).where(
+                DividendPayment.user_id == user_id, DividendPayment.security_id == security_id
+            )
+        ).rowcount
+    session.commit()
+    return txs, divs
+
+
+# --- Dinero aportado, DCA mensual y evolución -------------------------------------------
+
+
+def add_contribution(
+    session: Session, user_id: int, *, day: date, amount: Decimal, kind: str, notes: str = ""
+) -> Contribution:
+    if kind not in ("initial", "adjust"):
+        raise PortfolioError("Tipo de aportación no válido")
+    if amount == 0:
+        raise PortfolioError("El importe no puede ser 0")
+    if kind == "initial" and amount < 0:
+        raise PortfolioError("El importe inicial debe ser positivo; para restar usa un ajuste")
+    if day > today():
+        raise PortfolioError("La fecha no puede ser futura")
+    row = Contribution(
+        user_id=user_id,
+        day=day,
+        amount=amount.quantize(Decimal("0.01")),
+        kind=kind,
+        notes=notes.strip()[:200] or None,
+    )
+    session.add(row)
+    session.commit()
+    return row
+
+
+def set_dca(
+    session: Session,
+    user_id: int,
+    *,
+    amount: Decimal,
+    day: int,
+    start_date: date,
+    active: bool = True,
+) -> DcaPlan:
+    if amount <= 0:
+        raise PortfolioError("La aportación mensual debe ser positiva")
+    if not 1 <= day <= 28:
+        raise PortfolioError("El día del mes debe estar entre 1 y 28")
+    plan = session.get(DcaPlan, user_id)
+    if plan is None:
+        plan = DcaPlan(
+            user_id=user_id, amount=amount, day=day, start_date=start_date, active=active
+        )
+        session.add(plan)
+    else:
+        if start_date != plan.start_date:
+            plan.applied_through = None
+        elif active and not plan.active:  # reactivar: los meses en pausa no se rellenan
+            plan.applied_through = today().replace(day=1) - timedelta(days=1)
+        plan.amount, plan.day, plan.start_date, plan.active = amount, day, start_date, active
+    session.commit()
+    return plan
+
+
+def apply_dca(session: Session, user_id: int, upto: date | None = None) -> int:
+    """Genera las aportaciones mensuales pendientes del plan DCA hasta `upto` (por defecto hoy).
+
+    Cada mes se genera una sola vez (`applied_through`); lo que luego borres o ajustes a mano
+    no se vuelve a crear.
+    """
+    plan = session.get(DcaPlan, user_id)
+    upto = upto or today()
+    if plan is None or not plan.active:
+        return 0
+    year, month = plan.start_date.year, plan.start_date.month
+    if plan.applied_through:
+        year, month = plan.applied_through.year, plan.applied_through.month + 1
+        if month == 13:
+            year, month = year + 1, 1
+    created = 0
+    last = plan.applied_through
+    while (year, month) <= (upto.year, upto.month):
+        due = date(year, month, plan.day)
+        if due > upto:
+            break
+        key = f"dca:{year}-{month:02d}"
+        if due >= plan.start_date and not session.scalar(
+            select(Contribution.id).where(
+                Contribution.user_id == user_id, Contribution.external_id == key
+            )
+        ):
+            session.add(
+                Contribution(
+                    user_id=user_id,
+                    day=due,
+                    amount=plan.amount,
+                    kind="dca",
+                    external_id=key,
+                    notes="DCA mensual",
+                )
+            )
+            created += 1
+        last = due
+        month += 1
+        if month == 13:
+            year, month = year + 1, 1
+    plan.applied_through = last
+    session.commit()
+    return created
+
+
+def invested_total(session: Session, user_id: int, upto: date | None = None) -> Decimal:
+    query = select(func.coalesce(func.sum(Contribution.amount), 0)).where(
+        Contribution.user_id == user_id
+    )
+    if upto:
+        query = query.where(Contribution.day <= upto)
+    return _d(session.scalar(query) or 0)
+
+
+def take_snapshot(session: Session, user_id: int) -> PortfolioSnapshot | None:
+    """Guarda (o actualiza) la foto de hoy: lo aportado frente al valor de la cartera."""
+    rows = positions(session, user_id)
+    invested = invested_total(session, user_id, today())
+    if not rows and invested == 0:
+        return None
+    value = Decimal(str(round(summarize(rows).value_eur or 0, 2)))
+    snap = session.get(PortfolioSnapshot, (user_id, today()))
+    if snap is None:
+        snap = PortfolioSnapshot(user_id=user_id, day=today(), invested=invested, value=value)
+        session.add(snap)
+    else:
+        snap.invested, snap.value = invested, value
+    session.commit()
+    return snap
+
+
+def snapshot_all(session: Session) -> int:
+    """Tarea nocturna: aplica el DCA y guarda la foto de cada usuario con cartera."""
+    user_ids = set(session.scalars(select(Transaction.user_id).distinct()))
+    user_ids |= set(session.scalars(select(Contribution.user_id).distinct()))
+    user_ids |= set(session.scalars(select(DcaPlan.user_id)))
+    for uid in sorted(user_ids):
+        apply_dca(session, uid)
+        take_snapshot(session, uid)
+    return len(user_ids)
+
+
+def snapshot_series(session: Session, user_id: int) -> list[PortfolioSnapshot]:
+    return list(
+        session.scalars(
+            select(PortfolioSnapshot)
+            .where(PortfolioSnapshot.user_id == user_id)
+            .order_by(PortfolioSnapshot.day)
+        )
+    )
 
 
 @dataclass

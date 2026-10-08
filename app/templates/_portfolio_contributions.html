@@ -1,0 +1,53 @@
+{% macro card(label, value, cls='', sub='') %}<article><div class="label">{{ label }}</div><div class="value {{ cls }}">{{ value }}</div>{% if sub %}<div class="label {{ cls }}">{{ sub }}</div>{% endif %}</article>{% endmacro %}
+<div class="cards">
+  {{ card('Dinero aportado', invested | fmt('eur')) }}
+  {{ card('Valor de la cartera', summary.value_eur | fmt('eur')) }}
+  {{ card('Valor vs aportado', gain_vs_invested | fmt('seur'), gain_vs_invested | gain, gain_vs_invested_pct | fmt('spct')) }}
+  {{ card('DCA mensual', (dca.amount | fmt('eur')) if dca and dca.active else '–', '', ('día ' ~ dca.day) if dca and dca.active else ('en pausa' if dca else '')) }}
+</div>
+<p class="muted"><small>Lo aportado lo introduces tú: no depende de las operaciones ni cambia al eliminar una posición. Importes en {{ base_currency }}.</small></p>
+
+{% if chart %}
+<h4>Aportado vs valor</h4>
+<svg viewBox="0 0 600 180" class="evolution" role="img" aria-label="Evolución de lo aportado y del valor de la cartera">
+  <polyline points="{{ chart.invested }}" fill="none" stroke="var(--ref-fair)" stroke-width="2" stroke-dasharray="6 4"/>
+  <polyline points="{{ chart.value }}" fill="none" stroke="var(--series-1)" stroke-width="2"/>
+</svg>
+<p class="muted"><small><span style="color: var(--series-1)">━</span> Valor · <span style="color: var(--ref-fair)">┅</span> Aportado · {{ chart.first.strftime('%d/%m/%Y') }} – {{ chart.last.strftime('%d/%m/%Y') }} · de {{ chart.lo | fmt('eur') }} a {{ chart.hi | fmt('eur') }}. Se guarda una foto al día.</small></p>
+{% else %}<p class="muted"><small>La gráfica aparecerá cuando haya al menos dos días guardados (se guarda una foto al día).</small></p>{% endif %}
+
+<div class="import-grid">
+<article>
+  <h4>Aportación inicial o ajuste</h4>
+  <p class="muted"><small>«Inicial» es lo que ya tenías invertido. «Ajuste» suma o resta (usa un importe negativo para retirar o corregir).</small></p>
+  <form method="post" action="{{ ROOT }}/portfolio/contributions" class="tx-form">
+    <label>Tipo<select name="kind"><option value="initial">Inicial</option><option value="adjust">Ajuste (+/−)</option></select></label>
+    <label>Fecha<input type="date" name="day" value="{{ today.isoformat() }}" max="{{ today.isoformat() }}" required></label>
+    <label>Importe (€)<input type="text" inputmode="decimal" name="amount" placeholder="5.000 o -200" required></label>
+    <label>Nota<input type="text" name="notes" maxlength="200"></label>
+    <button type="submit">Guardar</button>
+  </form>
+</article>
+<article>
+  <h4>DCA mensual</h4>
+  <p class="muted"><small>Cada mes se añade la aportación el día elegido. Se puede corregir con ajustes o borrando un mes; no se vuelve a generar.</small></p>
+  <form method="post" action="{{ ROOT }}/portfolio/dca" class="tx-form">
+    <label>Importe mensual (€)<input type="text" inputmode="decimal" name="amount" value="{{ dca.amount | fmt('qty') if dca else '' }}" required></label>
+    <label>Día del mes<input type="number" name="day" min="1" max="28" value="{{ dca.day if dca else 1 }}" required></label>
+    <label>Desde<input type="date" name="start_date" value="{{ (dca.start_date if dca else today).isoformat() }}" required></label>
+    <label><input type="checkbox" name="active" value="1"{% if not dca or dca.active %} checked{% endif %}> Activo</label>
+    <button type="submit">Guardar DCA</button>
+  </form>
+  {% if dca %}<form method="post" action="{{ ROOT }}/portfolio/dca/delete" onsubmit="return confirm('¿Quitar el plan DCA? Las aportaciones ya generadas se conservan.')"><button class="danger" type="submit">Quitar plan</button></form>{% endif %}
+</article>
+</div>
+
+<h4>Aportaciones</h4>
+<div class="scroll-x"><table class="striped">
+  <thead><tr><th>Fecha</th><th>Tipo</th><th class="num">Importe</th><th>Nota</th><th></th></tr></thead>
+  <tbody>{% for c in contributions %}<tr>
+    <td>{{ c.day.strftime('%d/%m/%Y') }}</td><td>{{ {'initial': 'Inicial', 'dca': 'DCA', 'adjust': 'Ajuste'}[c.kind] }}</td>
+    <td class="num {{ c.amount | gain }}">{{ c.amount | fmt('seur') }}</td><td>{{ c.notes or '' }}</td>
+    <td><form method="post" action="{{ ROOT }}/portfolio/contributions/{{ c.id }}/delete" onsubmit="return confirm('¿Borrar esta aportación?')"><button class="danger" type="submit">Borrar</button></form></td>
+  </tr>{% else %}<tr><td colspan="5">Sin aportaciones. Empieza con tu dinero ya invertido o configura un DCA.</td></tr>{% endfor %}</tbody>
+</table></div>

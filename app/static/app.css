@@ -330,3 +330,5 @@ form.stack button, .tx-form button { width: auto; margin: 0; }
 
 .positions tr.row-extra td { padding-top: 0; border-top: 0; }
 .positions tr.row-extra details { margin: 0 0 0.4rem; }
+svg.evolution { width: 100%; height: auto; max-height: 14rem; }
+form.inline label { display: inline-block; margin-right: 0.6rem; font-size: 0.8rem; }
