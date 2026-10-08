@@ -334,6 +334,57 @@ class DividendPayment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Contribution(Base):
+    """Dinero aportado a la cartera (a mano): inicial, DCA mensual o ajuste (+/-).
+
+    Es independiente de las operaciones: ni se recalcula con ellas ni al borrar una posición.
+    """
+
+    __tablename__ = "contributions"
+    __table_args__ = (
+        UniqueConstraint("user_id", "external_id"),
+        CheckConstraint("kind IN ('initial', 'dca', 'adjust')", name="kind"),
+        Index(None, "user_id", "day"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    day: Mapped[date] = mapped_column(Date)
+    amount: Mapped[Decimal] = mapped_column(Money)  # EUR; negativo = retirada o corrección
+    kind: Mapped[str] = mapped_column(String(8))  # initial|dca|adjust
+    external_id: Mapped[str | None] = mapped_column(String(64))  # «dca:2026-03»
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DcaPlan(Base):
+    """Aportación mensual automática de un usuario (genera filas `Contribution` de tipo dca)."""
+
+    __tablename__ = "dca_plans"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    amount: Mapped[Decimal] = mapped_column(Money)
+    day: Mapped[int]  # día del mes, 1-28
+    start_date: Mapped[date] = mapped_column(Date)
+    active: Mapped[bool] = mapped_column(server_default=true())
+    applied_through: Mapped[date | None] = mapped_column(Date)  # último mes ya generado
+
+
+class PortfolioSnapshot(Base):
+    """Foto diaria de lo aportado frente al valor de la cartera (para ver la evolución)."""
+
+    __tablename__ = "portfolio_snapshots"
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    invested: Mapped[Decimal] = mapped_column(Money)
+    value: Mapped[Decimal] = mapped_column(Money)
+
+
 class PendingDocument(Base):
     """PDF leído del buzón cuyo ISIN aún no corresponde a ningún valor: espera a que el usuario
     indique el ticker; entonces se procesa solo."""

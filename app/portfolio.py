@@ -12,16 +12,19 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from app import heytrade
 from app.config import get_settings, today
 from app.jobs import latest_fx
 from app.models import (
+    Contribution,
+    DcaPlan,
     DividendEvent,
     DividendPayment,
     PendingDocument,
+    PortfolioSnapshot,
     Quote,
     Security,
     Transaction,
@@ -144,7 +147,12 @@ def manual_total_eur(
 
 
 def add_dividend(
-    session: Session, user_id: int, security: Security, doc: heytrade.DividendDoc, source: str
+    session: Session,
+    user_id: int,
+    security: Security,
+    doc: heytrade.DividendDoc,
+    source: str,
+    commit: bool = True,
 ) -> DividendPayment:
     if doc.external_id and session.scalar(
         select(DividendPayment.id).where(
@@ -190,8 +198,273 @@ def add_dividend(
         external_id=doc.external_id or None,
     )
     session.add(pay)
-    session.commit()
+    if commit:
+        session.commit()
     return pay
+
+
+def _date(text: str) -> date:
+    text = text.strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            return date.fromisoformat(text)
+        d, m, y = re.split(r"[/.\-]", text)
+        return date(int(y) + 2000 if len(y) == 2 else int(y), int(m), int(d))
+    except ValueError:
+        raise PortfolioError(f"Fecha no válida: {text!r}") from None
+
+
+def add_dividend_history(
+    session: Session,
+    user_id: int,
+    security: Security,
+    text: str,
+    *,
+    currency: str,
+    fx_rate: Decimal | None,
+) -> tuple[int, int, list[str]]:
+    """Carga de golpe el histórico de dividendos cobrados de un valor.
+
+    Una línea por pago: `fecha de pago; acciones; bruto[; ret. origen; ret. destino; gastos;
+    cambio a €]` (los importes en la divisa del dividendo). Todo o nada: si una línea falla no se
+    guarda ninguna. Los pagos que ya existían se saltan. Devuelve (añadidos, repetidos, errores).
+    """
+    base = get_settings().base_currency
+    cur = (currency or security.currency or base).strip().upper()
+    default_fx = ZERO
+    if cur == base:
+        default_fx = Decimal(1)
+    elif fx_rate:
+        default_fx = fx_rate
+    else:
+        rate = latest_fx(session).get(cur)
+        if rate is None:
+            return 0, 0, [f"Indica el tipo de cambio {cur}→{base}"]
+        default_fx = Decimal(str(rate))
+    added = skipped = 0
+    errors: list[str] = []
+    for n, raw in enumerate(text.splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        cells = [c.strip() for c in re.split(r"[;\t]", line)]
+        if n == 1 and cells[0].lower().startswith(("fecha", "date")):
+            continue
+        try:
+            if not 3 <= len(cells) <= 7:
+                raise PortfolioError("usa «fecha; acciones; bruto» y, opcional, retenciones/gastos")
+            nums = []
+            for label, cell in zip(
+                ("Acciones", "Bruto", "Ret. origen", "Ret. destino", "Gastos", "Cambio"),
+                cells[1:],
+                strict=False,
+            ):
+                nums.append(heytrade.parse_number(cell) if cell else None)
+            nums += [None] * (6 - len(nums))
+            shares, gross, w_orig, w_dom, fees, line_fx = nums
+            if shares is None or gross is None:
+                raise PortfolioError("faltan acciones o importe bruto")
+            add_received_dividend(
+                session,
+                user_id,
+                security,
+                pay_date=_date(cells[0]),
+                shares=shares,
+                gross=gross,
+                currency=cur,
+                fx_rate=Decimal(1) if cur == base else (line_fx or default_fx),
+                withholding_origin=w_orig or ZERO,
+                withholding_domestic=w_dom or ZERO,
+                fees=fees or ZERO,
+                commit=False,
+            )
+            added += 1
+        except DuplicateError:
+            skipped += 1
+        except (PortfolioError, heytrade.ParseError) as exc:
+            errors.append(f"Línea {n}: {exc}")
+    if errors:
+        session.rollback()
+        return 0, 0, errors
+    session.commit()
+    return added, skipped, []
+
+
+def delete_position(
+    session: Session, user_id: int, security_id: int, *, keep_dividends: bool = False
+) -> tuple[int, int]:
+    """Borra de golpe las operaciones (y los dividendos) de un valor del usuario.
+
+    No simula ni recalcula nada: son borrados directos. Lo aportado (`Contribution`) no se toca.
+    Devuelve (operaciones, dividendos) borrados.
+    """
+    txs = session.execute(
+        delete(Transaction).where(
+            Transaction.user_id == user_id, Transaction.security_id == security_id
+        )
+    ).rowcount
+    divs = 0
+    if not keep_dividends:
+        divs = session.execute(
+            delete(DividendPayment).where(
+                DividendPayment.user_id == user_id, DividendPayment.security_id == security_id
+            )
+        ).rowcount
+    session.commit()
+    return txs, divs
+
+
+# --- Dinero aportado, DCA mensual y evolución -------------------------------------------
+
+
+def add_contribution(
+    session: Session, user_id: int, *, day: date, amount: Decimal, kind: str, notes: str = ""
+) -> Contribution:
+    if kind not in ("initial", "adjust"):
+        raise PortfolioError("Tipo de aportación no válido")
+    if amount == 0:
+        raise PortfolioError("El importe no puede ser 0")
+    if kind == "initial" and amount < 0:
+        raise PortfolioError("El importe inicial debe ser positivo; para restar usa un ajuste")
+    if day > today():
+        raise PortfolioError("La fecha no puede ser futura")
+    row = Contribution(
+        user_id=user_id,
+        day=day,
+        amount=amount.quantize(Decimal("0.01")),
+        kind=kind,
+        notes=notes.strip()[:200] or None,
+    )
+    session.add(row)
+    session.commit()
+    return row
+
+
+def set_dca(
+    session: Session,
+    user_id: int,
+    *,
+    amount: Decimal,
+    day: int,
+    start_date: date,
+    active: bool = True,
+) -> DcaPlan:
+    if amount <= 0:
+        raise PortfolioError("La aportación mensual debe ser positiva")
+    if not 1 <= day <= 28:
+        raise PortfolioError("El día del mes debe estar entre 1 y 28")
+    plan = session.get(DcaPlan, user_id)
+    if plan is None:
+        plan = DcaPlan(
+            user_id=user_id, amount=amount, day=day, start_date=start_date, active=active
+        )
+        session.add(plan)
+    else:
+        if start_date != plan.start_date:
+            plan.applied_through = None
+        elif active and not plan.active:  # reactivar: los meses en pausa no se rellenan
+            plan.applied_through = today().replace(day=1) - timedelta(days=1)
+        plan.amount, plan.day, plan.start_date, plan.active = amount, day, start_date, active
+    session.commit()
+    return plan
+
+
+def apply_dca(session: Session, user_id: int, upto: date | None = None) -> int:
+    """Genera las aportaciones mensuales pendientes del plan DCA hasta `upto` (por defecto hoy).
+
+    Cada mes se genera una sola vez (`applied_through`); lo que luego borres o ajustes a mano
+    no se vuelve a crear.
+    """
+    plan = session.get(DcaPlan, user_id)
+    upto = upto or today()
+    if plan is None or not plan.active:
+        return 0
+    year, month = plan.start_date.year, plan.start_date.month
+    if plan.applied_through:
+        year, month = plan.applied_through.year, plan.applied_through.month + 1
+        if month == 13:
+            year, month = year + 1, 1
+    created = 0
+    last = plan.applied_through
+    while (year, month) <= (upto.year, upto.month):
+        due = date(year, month, plan.day)
+        if due > upto:
+            break
+        key = f"dca:{year}-{month:02d}"
+        if due >= plan.start_date and not session.scalar(
+            select(Contribution.id).where(
+                Contribution.user_id == user_id, Contribution.external_id == key
+            )
+        ):
+            session.add(
+                Contribution(
+                    user_id=user_id,
+                    day=due,
+                    amount=plan.amount,
+                    kind="dca",
+                    external_id=key,
+                    notes="DCA mensual",
+                )
+            )
+            created += 1
+        last = due
+        month += 1
+        if month == 13:
+            year, month = year + 1, 1
+    plan.applied_through = last
+    session.commit()
+    return created
+
+
+def invested_total(session: Session, user_id: int, upto: date | None = None) -> Decimal:
+    """Dinero aportado: solo suman las aportaciones; compras, ventas y dividendos nunca lo tocan.
+
+    Las compras posteriores se entienden financiadas con dividendos o ventas, no con dinero nuevo.
+    """
+    query = select(func.coalesce(func.sum(Contribution.amount), 0)).where(
+        Contribution.user_id == user_id
+    )
+    if upto:
+        query = query.where(Contribution.day <= upto)
+    return _d(session.scalar(query) or 0)
+
+
+def take_snapshot(session: Session, user_id: int) -> PortfolioSnapshot | None:
+    """Guarda (o actualiza) la foto de hoy: lo aportado frente al valor de la cartera."""
+    rows = positions(session, user_id)
+    invested = invested_total(session, user_id, today())
+    if not rows and invested == 0:
+        return None
+    value = Decimal(str(round(summarize(rows).value_eur or 0, 2)))
+    snap = session.get(PortfolioSnapshot, (user_id, today()))
+    if snap is None:
+        snap = PortfolioSnapshot(user_id=user_id, day=today(), invested=invested, value=value)
+        session.add(snap)
+    else:
+        snap.invested, snap.value = invested, value
+    session.commit()
+    return snap
+
+
+def snapshot_all(session: Session) -> int:
+    """Tarea nocturna: aplica el DCA y guarda la foto de cada usuario con cartera."""
+    user_ids = set(session.scalars(select(Transaction.user_id).distinct()))
+    user_ids |= set(session.scalars(select(Contribution.user_id).distinct()))
+    user_ids |= set(session.scalars(select(DcaPlan.user_id)))
+    for uid in sorted(user_ids):
+        apply_dca(session, uid)
+        take_snapshot(session, uid)
+    return len(user_ids)
+
+
+def snapshot_series(session: Session, user_id: int) -> list[PortfolioSnapshot]:
+    return list(
+        session.scalars(
+            select(PortfolioSnapshot)
+            .where(PortfolioSnapshot.user_id == user_id)
+            .order_by(PortfolioSnapshot.day)
+        )
+    )
 
 
 @dataclass
@@ -265,14 +538,18 @@ def add_received_dividend(
     withholding_domestic: Decimal = ZERO,
     fx_rate: Decimal | None = None,
     ex_date: date | None = None,
+    fees: Decimal = ZERO,
     source: str = "manual",
+    commit: bool = True,
 ) -> DividendPayment:
     """Dividendo ya cobrado, a mano o importado junto a una posición (bruto y retenciones)."""
     base = get_settings().base_currency
     cur = (currency or security.currency or base).upper()
-    if gross <= 0 or shares <= 0 or withholding_origin < 0 or withholding_domestic < 0:
+    if gross <= 0 or shares <= 0 or min(withholding_origin, withholding_domestic, fees) < 0:
         raise PortfolioError("Acciones y bruto deben ser positivos y las retenciones no negativas")
-    if withholding_origin + withholding_domestic > gross:
+    if ex_date and ex_date > pay_date:
+        raise PortfolioError("La fecha ex-dividendo es posterior al pago")
+    if withholding_origin + withholding_domestic + fees > gross:
         raise PortfolioError("Las retenciones no pueden superar el bruto")
     if pay_date > today():
         raise PortfolioError("La fecha de cobro no puede ser futura")
@@ -283,7 +560,7 @@ def add_received_dividend(
         if rate is None:
             raise PortfolioError(f"Indica el tipo de cambio {cur}→{base}")
         fx_rate = Decimal(str(rate))
-    net = gross - withholding_origin - withholding_domestic
+    net = gross - withholding_origin - withholding_domestic - fees
     doc = heytrade.DividendDoc(
         isin=security.isin or "",
         name=security.name or "",
@@ -296,12 +573,12 @@ def add_received_dividend(
         withholding_origin=withholding_origin,
         withholding_domestic=withholding_domestic,
         withholding_rate=None,
-        fees=ZERO,
+        fees=fees,
         net=net,
         fx_rate=fx_rate,
         net_base=(net * fx_rate).quantize(Decimal("0.01")),
     )
-    return add_dividend(session, user_id, security, doc, source)
+    return add_dividend(session, user_id, security, doc, source, commit)
 
 
 def store_pending(session: Session, user_id: int, result: DocResult, data: bytes) -> None:
@@ -690,6 +967,89 @@ def project_dividends(session: Session, rows: list[Position]) -> Projection:
         index = now.year * 12 + now.month - 1 + i
         months.append((index // 12, index % 12 + 1, amount))
     return Projection(months, sum(buckets), estimated)
+
+
+@dataclass
+class CalendarMonth:
+    year: int
+    month: int
+    received_gross: float = 0.0
+    received_net: float = 0.0
+    pending: float = 0.0  # esperado y aún sin cobrar (mes actual y siguientes), bruto
+    future: bool = False  # el mes actual o posterior
+
+    @property
+    def total(self) -> float:
+        return self.received_gross + self.pending
+
+
+@dataclass
+class DividendCalendar:
+    months: list[CalendarMonth]
+    start: str  # «AAAA-MM» del primer mes de la ventana
+    prev_start: str | None  # ventana anterior (12 meses atrás), None si no hay datos más antiguos
+    next_start: str | None  # ventana siguiente, None si ya se ve la de los próximos 12 meses
+    is_current: bool  # la ventana empieza en el mes actual
+    avg_received_gross: float  # media mensual cobrada en los últimos meses completos
+    avg_received_net: float
+    avg_months: int  # meses sobre los que se calcula esa media
+    window_received_gross: float
+    window_expected_gross: float  # cobrado + pendiente en la ventana
+
+
+def _ym(index: int) -> str:
+    return f"{index // 12}-{index % 12 + 1:02d}"
+
+
+def dividend_calendar(
+    session: Session, user_id: int, projection: Projection, start: str = ""
+) -> DividendCalendar:
+    """Dividendos por mes de una ventana de 12 meses: cobrados (por fecha de pago) y esperados.
+
+    Por defecto la ventana son los próximos 12 meses (desde el actual); `start` («AAAA-MM») la
+    mueve a periodos anteriores. Los meses pasados solo llevan lo cobrado; el actual y los
+    siguientes, lo cobrado más lo esperado que falta (proyección, ver `project_dividends`).
+    """
+    now = today()
+    now_idx = now.year * 12 + now.month - 1
+    received: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0])
+    for pay in session.scalars(
+        select(DividendPayment).where(
+            DividendPayment.user_id == user_id,
+            DividendPayment.source != "import",  # sin fecha real de cobro: no entran por mes
+        )
+    ):
+        bucket = received[pay.pay_date.year * 12 + pay.pay_date.month - 1]
+        bucket[0] += float(pay.gross * pay.fx_rate)
+        bucket[1] += float(pay.net_base)
+    first_idx = min(received, default=now_idx)
+    try:
+        year, month = (int(x) for x in start.split("-"))
+        start_idx = year * 12 + month - 1
+    except ValueError:
+        start_idx = now_idx
+    start_idx = max(min(start_idx, now_idx), first_idx - 11)
+    expected = {now_idx + i: amount for i, (_, _, amount) in enumerate(projection.months)}
+    months = []
+    for idx in range(start_idx, start_idx + 12):
+        gross, net = received.get(idx, (0.0, 0.0))
+        future = idx >= now_idx
+        pending = max(expected.get(idx, 0.0) - gross, 0.0) if future else 0.0
+        months.append(CalendarMonth(idx // 12, idx % 12 + 1, gross, net, pending, future))
+    n = min(12, max(now_idx - first_idx, 0))  # meses completos con historia, máximo 12
+    done = [received.get(i, (0.0, 0.0)) for i in range(now_idx - n, now_idx)]
+    return DividendCalendar(
+        months=months,
+        start=_ym(start_idx),
+        prev_start=_ym(start_idx - 12) if start_idx - 12 >= first_idx - 11 else None,
+        next_start=_ym(min(start_idx + 12, now_idx)) if start_idx < now_idx else None,
+        is_current=start_idx == now_idx,
+        avg_received_gross=sum(g for g, _ in done) / n if n else 0.0,
+        avg_received_net=sum(x for _, x in done) / n if n else 0.0,
+        avg_months=n,
+        window_received_gross=sum(m.received_gross for m in months),
+        window_expected_gross=sum(m.total for m in months),
+    )
 
 
 # --- Resumen fiscal ------------------------------------------------------------------------

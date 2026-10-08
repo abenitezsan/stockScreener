@@ -9,7 +9,7 @@ from collections.abc import Callable
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy.orm import Session
 
-from app import jobs, mailbox
+from app import jobs, mailbox, portfolio
 from app.config import get_settings
 from app.db import SessionLocal
 
@@ -47,6 +47,10 @@ def create_scheduler() -> BackgroundScheduler:
     # Fundamentales, histórico y valoración tras el cierre americano
     scheduler.add_job(
         _run(jobs.nightly), "cron", day_of_week="mon-fri", hour=23, minute=15, id="nightly"
+    )
+    # Foto diaria de lo aportado frente al valor de cada cartera (y aportaciones DCA pendientes)
+    scheduler.add_job(
+        _run(portfolio.snapshot_all), "cron", hour=23, minute=45, id="portfolio_snapshots"
     )
     # Cuentas anuales (cambian como mucho trimestralmente)
     scheduler.add_job(_run(jobs.weekly), "cron", day_of_week="sat", hour=10, id="weekly")

@@ -1,18 +1,32 @@
-{% set mx = (projection.months | map(attribute=2) | max) or 1 %}
+{% set mnames = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'] %}
 <div class="cards">
   <article><div class="label">Próximos 12 meses (bruto)</div><div class="value">{{ projection.total_eur | fmt('eur') }}</div></article>
-  <article><div class="label">Media mensual</div><div class="value">{{ (projection.total_eur / 12) | fmt('eur') }}</div></article>
+  <article><div class="label">Media mensual esperada</div><div class="value">{{ (projection.total_eur / 12) | fmt('eur') }}</div></article>
+  <article><div class="label">Media mensual cobrada{% if calendar.avg_months %} ({{ calendar.avg_months }} m){% endif %}</div>
+    <div class="value">{{ calendar.avg_received_gross | fmt('eur') }}</div><div class="label">bruto · neto {{ calendar.avg_received_net | fmt('eur') }}</div></article>
   <article><div class="label">Yield on cost</div><div class="value">{{ summary.yoc | fmt('pct') }}</div></article>
   <article><div class="label">Cobrado hasta hoy (bruto)</div><div class="value">{{ summary.dividends_gross_eur | fmt('eur') }}</div></article>
 </div>
-<h4>Proyección mensual</h4>
-<div class="bars">
-{% for year, month, amount in projection.months %}
-  <div class="bar-row wide"><span class="bar-label">{{ ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][month - 1] }} {{ year }}</span>
-    <span class="bar" style="--w: {{ (amount / mx * 100) | round(1) }}%"></span><span class="bar-val">{{ amount | fmt('eur') }}</span></div>
-{% endfor %}
-</div>
-<p class="muted"><small>Se repite el calendario de pagos de los últimos 12 meses (mes de la fecha ex-dividendo, así que el cobro llega algo después) con el dividendo estimado actual y tus acciones de hoy, a cambio actual y en bruto.
+
+{% set first = calendar.months[0] %}{% set last = calendar.months[-1] %}
+<h4>Dividendos por mes · {{ mnames[first.month - 1] }} {{ first.year }} – {{ mnames[last.month - 1] }} {{ last.year }}</h4>
+<nav class="div-nav" aria-label="Periodos de 12 meses">
+  {% if calendar.prev_start %}<a role="button" class="secondary outline" href="{{ ROOT }}/portfolio?tab=dividendos&start={{ calendar.prev_start }}">← 12 meses antes</a>{% else %}<span class="muted">← sin datos anteriores</span>{% endif %}
+  {% if not calendar.is_current %}<a href="{{ ROOT }}/portfolio?tab=dividendos">Hoy</a>{% endif %}
+  {% if calendar.next_start %}<a role="button" class="secondary outline" href="{{ ROOT }}/portfolio?tab=dividendos&start={{ calendar.next_start }}">12 meses después →</a>{% else %}<span class="muted">próximos 12 meses</span>{% endif %}
+</nav>
+<svg viewBox="0 0 600 200" class="evolution div-chart" role="img" aria-label="Dividendos brutos por mes: cobrados y esperados">
+  <line x1="0" y1="170" x2="600" y2="170" stroke="var(--grid, #ccc)" />
+  {% for c in div_chart %}{% set m = c.m %}
+  <g><title>{{ mnames[m.month - 1] }} {{ m.year }}: cobrado {{ m.received_gross | fmt('eur') }}{% if m.pending %}, pendiente {{ m.pending | fmt('eur') }}{% endif %}</title>
+    {% if c.got_h %}<rect x="{{ c.x }}" y="{{ c.got_y | round(1) }}" width="41" height="{{ c.got_h | round(1) }}" rx="2" fill="var(--series-1)"/>{% endif %}
+    {% if c.pend_h %}<rect x="{{ c.x }}" y="{{ c.pend_y | round(1) }}" width="41" height="{{ c.pend_h | round(1) }}" rx="2" fill="var(--series-1)" fill-opacity="0.35" stroke="var(--series-1)" stroke-dasharray="3 2"/>{% endif %}
+    {% if m.total %}<text x="{{ c.x + 20.5 }}" y="{{ c.label_y | round(1) }}" text-anchor="middle" font-size="10" fill="currentColor">{{ m.total | round | int }}</text>{% endif %}
+    <text x="{{ c.x + 20.5 }}" y="186" text-anchor="middle" font-size="10" fill="currentColor">{{ mnames[m.month - 1] }}{% if m.month == 1 or loop.first %} {{ m.year }}{% endif %}</text>
+  </g>{% endfor %}
+</svg>
+<p class="muted"><small><span style="color: var(--series-1)">■</span> Cobrado (por fecha de pago, bruto en €) · <span style="color: var(--series-1)">▢</span> Esperado y pendiente. En este periodo: cobrado {{ calendar.window_received_gross | fmt('eur') }}{% if calendar.window_expected_gross > calendar.window_received_gross %}, esperado en total {{ calendar.window_expected_gross | fmt('eur') }}{% endif %} · media {{ (calendar.window_expected_gross / 12) | fmt('eur') }}/mes.
+Lo esperado repite el calendario de pagos de los últimos 12 meses (mes de la fecha ex-dividendo, así que el cobro llega algo después) con el dividendo estimado actual y tus acciones de hoy, a cambio actual.
 {% if projection.estimated %} Sin calendario conocido, repartido por igual: {{ projection.estimated | join(', ') }}.{% endif %}</small></p>
 
 <h4>Cobrado por año</h4>

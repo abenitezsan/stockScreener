@@ -94,7 +94,16 @@ def _column_name(column) -> str:
     return re.sub(r"\[.*?\]", "", str(column)).strip().lower()
 
 
-NAME_COLUMNS = ("Company", "Name", "Company name", "Constituent", "Constituent name")
+NAME_COLUMNS = (
+    "Company",
+    "Name",
+    "Company name",
+    "Constituent",
+    "Constituent name",
+    "Empresa",
+    "Compañía",
+    "Nombre",
+)
 
 
 def _find_column(tables: list[pd.DataFrame], columns: tuple[str, ...]):
@@ -195,13 +204,23 @@ class Source:
 
 
 # "MNEM code": códigos nemotécnicos de Euronext Dublin (ISEQ 20), iguales a los de Yahoo (.IR)
-TICKER_COLUMNS = ("Ticker", "Symbol", "Ticker symbol", "Stock symbol", "EPIC", "Code", "MNEM")
+TICKER_COLUMNS = (
+    "Ticker",
+    "Symbol",
+    "Ticker symbol",
+    "Stock symbol",
+    "EPIC",
+    "Code",
+    "MNEM",
+    "Símbolo",
+    "Código",
+)
 
 
-def wiki(url: str, suffix: str) -> Source:
+def wiki(url: str, suffix: str, lang: str = "en") -> Source:
     """Página de Wikipedia con una tabla de componentes; los tickers llevan `suffix` en Yahoo."""
     return Source(
-        f"https://en.wikipedia.org/wiki/{url}",
+        f"https://{lang}.wikipedia.org/wiki/{url}",
         lambda html: _wiki_symbols(
             html,
             TICKER_COLUMNS,
@@ -220,6 +239,8 @@ SOURCES: dict[str, Source] = {
     "TSX60": wiki("S%26P/TSX_60", ".TO"),
     # --- Europa: índices nacionales de los mercados de HeyTrade (Wikipedia)
     "IBEX35": wiki("IBEX_35", ".MC"),
+    # Mediana capitalización española (Ebro, Viscofan…): la tabla solo está en la Wikipedia en español
+    "IBEXMC": wiki("IBEX_Medium_Cap", ".MC", lang="es"),
     "DAX": wiki("DAX", ".DE"),
     "CAC40": wiki("CAC_40", ".PA"),
     "FTSE100": wiki("FTSE_100_Index", ".L"),

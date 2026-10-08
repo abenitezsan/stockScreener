@@ -5,6 +5,8 @@
 {% macro card(label, value, cls='', sub='') %}<article><div class="label">{{ label }}</div><div class="value {{ cls }}">{{ value }}</div>{% if sub %}<div class="label {{ cls }}">{{ sub }}</div>{% endif %}</article>{% endmacro %}
 <div class="cards">
   {{ card('Valor de la cartera', s.value_eur | fmt('eur'), '', ((s.day_change_eur | fmt('seur')) ~ ' hoy') if s.day_change_eur else '') }}
+  {% if has_invested %}{{ card('Dinero aportado', invested | fmt('eur'), '', 'a mano · pestaña Aportaciones') }}
+  {{ card('Valor vs aportado', gain_vs_invested | fmt('seur'), gain_vs_invested | gain, gain_vs_invested_pct | fmt('spct')) }}{% endif %}
   {{ card('Coste', s.cost_eur | fmt('eur')) }}
   {{ card('Revalorización', s.unrealized_eur | fmt('seur'), s.unrealized_eur | gain, s.unrealized_pct | fmt('spct')) }}
   {{ card('Dividendos cobrados (bruto)', s.dividends_gross_eur | fmt('eur')) }}
@@ -41,6 +43,15 @@
         {% elif ld.change is not none and ld.change < -0.0005 %}<span class="neg" title="Baja {{ (-ld.change) | fmt('pct') }}">▼ {{ (-ld.change) | fmt('pct') }}</span>
         {% elif ld.change is not none %}<span class="muted">=</span>{% endif %}{% else %}–{% endif %}</td>
     </tr>
+    <tr class="row-extra"><td colspan="11">
+      <details><summary><small>Añadir dividendo cobrado de {{ sec.symbol }}</small></summary>
+        {% with sec_symbol=sec.symbol, sec_currency=sec.currency, back_to='/portfolio?tab=posiciones' %}{% include "_portfolio_div_form.html" %}{% endwith %}
+      </details>
+      <details><summary><small>Cargar histórico de dividendos de {{ sec.symbol }}</small></summary>
+        {% with sec_symbol=sec.symbol, sec_currency=sec.currency, back_to='/portfolio?tab=posiciones' %}{% include "_portfolio_div_history_form.html" %}{% endwith %}
+      </details>
+      {% with p=p %}{% include "_portfolio_delete_position.html" %}{% endwith %}
+    </td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -60,10 +71,11 @@
 
 {% if closed %}
 <details><summary>Posiciones cerradas ({{ closed | length }})</summary>
-<table><thead><tr><th>Valor</th><th class="num">Resultado vendido</th><th class="num">Dividendos (bruto)</th><th class="num">Total return</th></tr></thead><tbody>
+<table><thead><tr><th>Valor</th><th class="num">Resultado vendido</th><th class="num">Dividendos (bruto)</th><th class="num">Total return</th><th></th></tr></thead><tbody>
   {% for p in closed %}<tr><td><a href="{{ ROOT }}/security/{{ p.security.symbol }}">{{ p.security.symbol }}</a></td>
     <td class="num {{ p.realized_eur | gain }}">{{ p.realized_eur | fmt('seur') }}</td><td class="num">{{ p.dividends_gross_eur | fmt('eur') }}</td>
-    <td class="num {{ (p.realized_eur + p.dividends_gross_eur) | gain }}">{{ (p.realized_eur + p.dividends_gross_eur) | fmt('seur') }}</td></tr>{% endfor %}
+    <td class="num {{ (p.realized_eur + p.dividends_gross_eur) | gain }}">{{ (p.realized_eur + p.dividends_gross_eur) | fmt('seur') }}</td>
+    <td>{% include "_portfolio_delete_position.html" %}</td></tr>{% endfor %}
 </tbody></table></details>
 {% endif %}
 {% endif %}

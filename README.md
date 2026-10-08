@@ -142,7 +142,7 @@ universo con los componentes de los índices principales de sus mercados, sacado
 | Región | Índices |
 |---|---|
 | EE. UU. y Canadá | S&P 500, S&P/TSX 60 |
-| España | IBEX 35 |
+| España | IBEX 35 e IBEX Medium Cap (mediana capitalización, de la Wikipedia en español) |
 | Resto de Europa | DAX, CAC 40, FTSE 100, FTSE 250, AEX, BEL 20, SMI, FTSE MIB, PSI, ISEQ 20, OMX Stockholm 30, OMX Copenhagen 25, OMX Helsinki 25, OBX |
 
 Si una fuente falla, las demás se cargan igual, y el error indica qué tablas encontró en la

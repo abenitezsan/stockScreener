@@ -1,5 +1,5 @@
 <form method="post" action="{{ ROOT }}/portfolio/dividends" class="tx-form">
-  {% if sec_symbol %}<input type="hidden" name="ident" value="{{ sec_symbol }}"><input type="hidden" name="back" value="/security/{{ sec_symbol }}">
+  {% if sec_symbol %}<input type="hidden" name="ident" value="{{ sec_symbol }}"><input type="hidden" name="back" value="{{ back_to or '/security/' ~ sec_symbol }}">
   {% else %}<label>Ticker o ISIN<input type="text" name="ident" required maxlength="32"></label>{% endif %}
   <label>Fecha de cobro<input type="date" name="pay_date" value="{{ today.isoformat() }}" max="{{ today.isoformat() }}" required></label>
   <label>Acciones<input type="text" inputmode="decimal" name="shares" required></label>

@@ -1,5 +1,6 @@
 """Rutas de la cartera: resumen, dividendos, resumen fiscal, operaciones e importación."""
 
+import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Annotated
@@ -20,7 +21,7 @@ from sqlalchemy import select
 from app import heytrade, mailbox, portfolio
 from app.config import get_settings, today
 from app.jobs import latest_fx
-from app.models import DividendPayment, Security, Transaction
+from app.models import Contribution, DcaPlan, DividendPayment, Security, Transaction
 from app.web import ROOT, DbSession, PortfolioUser, current_user, templates
 
 router = APIRouter(dependencies=[Depends(current_user)])
@@ -29,6 +30,7 @@ TABS = {
     "posiciones": "Posiciones",
     "dividendos": "Dividendos",
     "fiscal": "Fiscal",
+    "aportaciones": "Aportaciones",
     "operaciones": "Operaciones",
     "importar": "Añadir e importar",
 }
@@ -42,11 +44,66 @@ def _number(text: str, label: str) -> Decimal:
         raise portfolio.PortfolioError(f"«{label}» no es un número válido") from None
 
 
+def _money(text: str, label: str) -> Decimal:
+    """Importe en euros: «5.000» son cinco mil (el punto solo separa miles), «5000,50» también vale."""
+    cleaned = text.strip().replace(" ", "")
+    if re.fullmatch(r"-?\d{1,3}(\.\d{3})+", cleaned):
+        cleaned = cleaned.replace(".", "")
+    return _number(cleaned, label)
+
+
 def _back(value: str | None) -> str:
     """Solo se vuelve a la cartera o a una ficha (nada de redirecciones externas)."""
     if value and value.startswith(("/portfolio", "/security/")) and "//" not in value[1:]:
         return value
     return "/portfolio?tab=operaciones"
+
+
+def _div_chart(cal) -> list[dict]:
+    """Columnas SVG (viewBox 600x200) de la ventana: cobrado (macizo) y pendiente (claro)."""
+    top = max((m.total for m in cal.months), default=0.0) or 1.0
+    plot = 150.0  # alto útil
+    out = []
+    for i, m in enumerate(cal.months):
+        got, pend = m.received_gross / top * plot, m.pending / top * plot
+        out.append(
+            {
+                "x": 8 + i * 49,
+                "got_h": got,
+                "got_y": 170 - got,
+                "pend_h": pend,
+                "pend_y": 170 - got - pend,
+                "label_y": 170 - got - pend - 4,
+                "m": m,
+            }
+        )
+    return out
+
+
+def _chart(snaps) -> dict | None:
+    """Puntos SVG (viewBox 600x180) de lo aportado y del valor; None si hay menos de 2 fotos."""
+    if len(snaps) < 2:
+        return None
+    lo = min(min(float(x.invested), float(x.value)) for x in snaps)
+    hi = max(max(float(x.invested), float(x.value)) for x in snaps)
+    span = (hi - lo) or 1.0
+    days = (snaps[-1].day - snaps[0].day).days or 1
+
+    def points(attr: str) -> str:
+        return " ".join(
+            f"{(x.day - snaps[0].day).days / days * 600:.1f},"
+            f"{170 - (float(getattr(x, attr)) - lo) / span * 160:.1f}"
+            for x in snaps
+        )
+
+    return {
+        "invested": points("invested"),
+        "value": points("value"),
+        "lo": lo,
+        "hi": hi,
+        "first": snaps[0].day,
+        "last": snaps[-1].day,
+    }
 
 
 def _page(
@@ -59,6 +116,7 @@ def _page(
     errors: list[str] | None = None,
     notice: str = "",
     status: int = 200,
+    start: str = "",
 ):
     tab = tab if tab in TABS else "posiciones"
     rows = portfolio.positions(session, user.id, include_closed=tab == "posiciones")
@@ -75,6 +133,24 @@ def _page(
         "today": today(),
         "base_currency": get_settings().base_currency,
     }
+    if tab in ("posiciones", "aportaciones"):
+        portfolio.apply_dca(session, user.id)
+        invested = float(portfolio.invested_total(session, user.id, today()))
+        ctx["invested"] = invested
+        ctx["has_invested"] = invested != 0 or session.get(DcaPlan, user.id) is not None
+        ctx["gain_vs_invested"] = ctx["summary"].value_eur - invested
+        ctx["gain_vs_invested_pct"] = ctx["gain_vs_invested"] / invested if invested > 0 else None
+    if tab == "aportaciones":
+        portfolio.take_snapshot(session, user.id)
+        ctx["dca"] = session.get(DcaPlan, user.id)
+        ctx["contributions"] = list(
+            session.scalars(
+                select(Contribution)
+                .where(Contribution.user_id == user.id)
+                .order_by(Contribution.day.desc(), Contribution.id.desc())
+            )
+        )
+        ctx["chart"] = _chart(portfolio.snapshot_series(session, user.id))
     if tab == "posiciones":
         ctx["by_sector"] = portfolio.allocation(open_rows, lambda p: p.security.sector)
         ctx["by_country"] = portfolio.allocation(open_rows, lambda p: p.security.country)
@@ -83,6 +159,10 @@ def _page(
         ctx["projection"] = portfolio.project_dividends(session, open_rows)
         ctx["received"] = portfolio.tax_summary(session, user.id)
         ctx["imported_dividends"] = portfolio.imported_dividends_eur(session, user.id)
+        ctx["calendar"] = cal = portfolio.dividend_calendar(
+            session, user.id, ctx["projection"], start
+        )
+        ctx["div_chart"] = _div_chart(cal)
     if tab == "fiscal":
         ctx["years"] = portfolio.tax_summary(session, user.id)
         ctx["imported_dividends"] = portfolio.imported_dividends_eur(session, user.id)
@@ -113,11 +193,17 @@ def portfolio_page(
     user: PortfolioUser,
     tab: str = "posiciones",
     done: str = "",
+    start: str = "",
 ):
-    notice = {"op": "Operación guardada.", "deleted": "Eliminado.", "isin": "ISIN asignado."}.get(
-        done, ""
-    )
-    return _page(request, session, user, tab, notice=notice)
+    notice = {
+        "op": "Operación guardada.",
+        "pos": "Posición eliminada.",
+        "contrib": "Aportación guardada.",
+        "dca": "DCA guardado.",
+        "deleted": "Eliminado.",
+        "isin": "ISIN asignado.",
+    }.get(done, "")
+    return _page(request, session, user, tab, notice=notice, start=start)
 
 
 @router.post("/portfolio/upload", response_class=HTMLResponse)
@@ -282,6 +368,40 @@ def add_manual_transaction(
     return RedirectResponse(f"{ROOT}{target}{sep}done=op", status_code=303)
 
 
+@router.post("/portfolio/dividends/history", response_class=HTMLResponse)
+def add_dividend_history(
+    request: Request,
+    session: DbSession,
+    user: PortfolioUser,
+    ident: str = Form(...),
+    text: str = Form(...),
+    currency: str = Form(""),
+    fx_rate: str = Form(""),
+    back: str = Form(""),
+):
+    target = _back(back)
+    tab = "posiciones" if target.startswith("/portfolio?tab=posiciones") else "importar"
+    try:
+        sec = portfolio.find_security(session, ident)
+        if sec is None:
+            raise portfolio.PortfolioError(f"«{ident.strip()}» no está en el universo")
+        fx = _number(fx_rate, "Tipo de cambio") if fx_rate.strip() else None
+        added, skipped, errors = portfolio.add_dividend_history(
+            session, user.id, sec, text[:50000], currency=currency, fx_rate=fx
+        )
+        if not errors and not added and not skipped:
+            errors = ["No hay ningún dividendo que cargar"]
+    except (portfolio.PortfolioError, InvalidOperation) as exc:
+        session.rollback()
+        errors, added, skipped = [str(exc)], 0, 0
+    if errors:
+        return _page(request, session, user, tab, errors=errors, status=400)
+    note = f"{added} dividendos cargados" + (
+        f"; {skipped} ya existían y se han saltado." if skipped else "."
+    )
+    return _page(request, session, user, tab if tab == "posiciones" else "dividendos", notice=note)
+
+
 @router.post("/portfolio/dividends", response_class=HTMLResponse)
 def add_manual_dividend(
     request: Request,
@@ -319,10 +439,98 @@ def add_manual_dividend(
         )
     except (portfolio.PortfolioError, InvalidOperation) as exc:
         session.rollback()
-        return _page(request, session, user, "importar", errors=[str(exc)], status=400)
+        tab = "posiciones" if _back(back).startswith("/portfolio?tab=posiciones") else "importar"
+        return _page(request, session, user, tab, errors=[str(exc)], status=400)
     target = _back(back)
     sep = "&" if "?" in target else "?"
     return RedirectResponse(f"{ROOT}{target}{sep}done=op", status_code=303)
+
+
+@router.post("/portfolio/securities/{security_id}/delete")
+def delete_position(
+    security_id: int,
+    session: DbSession,
+    user: PortfolioUser,
+    keep_dividends: str = Form(""),
+):
+    """Elimina la posición entera a mano, sin validaciones ni recálculos (ni toca lo aportado)."""
+    if session.get(Security, security_id) is None:
+        raise HTTPException(404)
+    portfolio.delete_position(session, user.id, security_id, keep_dividends=bool(keep_dividends))
+    return RedirectResponse(f"{ROOT}/portfolio?tab=posiciones&done=pos", status_code=303)
+
+
+@router.post("/portfolio/contributions", response_class=HTMLResponse)
+def add_contribution(
+    request: Request,
+    session: DbSession,
+    user: PortfolioUser,
+    kind: str = Form(...),
+    day: str = Form(...),
+    amount: str = Form(...),
+    notes: str = Form(""),
+):
+    try:
+        try:
+            when = date.fromisoformat(day)
+        except ValueError:
+            raise portfolio.PortfolioError("Fecha no válida") from None
+        portfolio.add_contribution(
+            session,
+            user.id,
+            day=when,
+            amount=_money(amount, "Importe"),
+            kind=kind,
+            notes=notes,
+        )
+    except (portfolio.PortfolioError, InvalidOperation) as exc:
+        session.rollback()
+        return _page(request, session, user, "aportaciones", errors=[str(exc)], status=400)
+    return RedirectResponse(f"{ROOT}/portfolio?tab=aportaciones&done=contrib", status_code=303)
+
+
+@router.post("/portfolio/contributions/{row_id}/delete")
+def delete_contribution(row_id: int, session: DbSession, user: PortfolioUser):
+    _delete(session, user, Contribution, row_id)
+    return RedirectResponse(f"{ROOT}/portfolio?tab=aportaciones&done=deleted", status_code=303)
+
+
+@router.post("/portfolio/dca", response_class=HTMLResponse)
+def save_dca(
+    request: Request,
+    session: DbSession,
+    user: PortfolioUser,
+    amount: str = Form(...),
+    day: int = Form(1),
+    start_date: str = Form(...),
+    active: str = Form(""),
+):
+    try:
+        try:
+            start = date.fromisoformat(start_date)
+        except ValueError:
+            raise portfolio.PortfolioError("Fecha no válida") from None
+        portfolio.set_dca(
+            session,
+            user.id,
+            amount=_money(amount, "Aportación mensual"),
+            day=day,
+            start_date=start,
+            active=bool(active),
+        )
+    except (portfolio.PortfolioError, InvalidOperation) as exc:
+        session.rollback()
+        return _page(request, session, user, "aportaciones", errors=[str(exc)], status=400)
+    return RedirectResponse(f"{ROOT}/portfolio?tab=aportaciones&done=dca", status_code=303)
+
+
+@router.post("/portfolio/dca/delete")
+def delete_dca(session: DbSession, user: PortfolioUser):
+    plan = session.get(DcaPlan, user.id)
+    if plan is not None:  # las aportaciones ya generadas se conservan
+        session.delete(plan)
+        session.commit()
+    return RedirectResponse(f"{ROOT}/portfolio?tab=aportaciones&done=deleted", status_code=303)
 
 
 def _delete(session, user, model, row_id: int):

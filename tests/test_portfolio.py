@@ -366,3 +366,222 @@ def test_manual_received_dividend(client):
         body = {"ident": "AAA", "pay_date": "2026-04-01", "shares": "10", "gross": "2", **data}
         assert client.post("/portfolio/dividends", data=body).status_code == 400
     assert "Mi posición" in client.get("/security/AAA").text
+
+
+def test_manual_dividend(client):
+    user = _user(client, "mdiv@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50", "as_of": "2026-01-02"})
+    data = {
+        "ident": "AAA",
+        "pay_date": "2026-03-01",
+        "shares": "10",
+        "gross": "12,50",
+        "withholding_origin": "1,50",
+        "fx_rate": "",
+    }
+    r = client.post("/portfolio/dividends", data=data, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].endswith("tab=operaciones&done=op")
+    dup = client.post("/portfolio/dividends", data=data)
+    assert dup.status_code == 400 and "Ya hay un dividendo igual" in dup.text
+    bad = client.post("/portfolio/dividends", data={**data, "gross": "x", "pay_date": "2026-03-02"})
+    assert bad.status_code == 400
+    over = client.post(
+        "/portfolio/dividends", data={**data, "withholding_origin": "99", "pay_date": "2026-03-03"}
+    )
+    assert over.status_code == 400 and "no pueden superar el bruto" in over.text
+    unknown = client.post("/portfolio/dividends", data={**data, "ident": "NOPE"})
+    assert unknown.status_code == 400 and "no está en el universo" in unknown.text
+    with _db() as s:
+        pos = portfolio.position_for(s, user.id, _sec(s, "AAA").id)
+        assert pos.dividends_net_eur > 0
+        assert pos.dividends_net_eur < pos.dividends_gross_eur
+    assert "AAA" in client.get("/portfolio?tab=operaciones").text
+    assert client.get("/portfolio?tab=importar").status_code == 200
+    assert "Añadir dividendo cobrado" in client.get("/security/AAA").text
+    page = client.get("/portfolio?tab=posiciones").text
+    assert "Añadir dividendo cobrado de AAA" in page and 'value="/portfolio?tab=posiciones"' in page
+    data = {
+        "ident": "AAA",
+        "pay_date": "2026-04-01",
+        "shares": "10",
+        "back": "/portfolio?tab=posiciones",
+    }
+    ok = client.post("/portfolio/dividends", data={**data, "gross": "5"}, follow_redirects=False)
+    assert ok.status_code == 303 and "tab=posiciones" in ok.headers["location"]
+    bad = client.post("/portfolio/dividends", data={**data, "gross": "x"})
+    assert bad.status_code == 400 and "Posiciones" in bad.text and "no es un número" in bad.text
+
+
+def test_history_delete_position_and_contributions(client):
+    from sqlalchemy import select
+
+    from app import auth
+    from app.models import Contribution, DividendPayment, Transaction
+
+    auth._failures.clear()  # el alta de usuarios cuenta intentos por IP
+    user = _user(client, "hist@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50", "as_of": "2026-01-02"})
+    # histórico de dividendos de golpe: todo o nada, repetidos saltados
+    hist = {"ident": "AAA", "back": "/portfolio?tab=posiciones", "currency": "EUR"}
+    text = "fecha;a;b\n15/01/2026; 10; 5,00; 0,95\n2026-02-15; 10; 5,00\n# comentario\n15/03/2026; 10; 5"
+    r = client.post("/portfolio/dividends/history", data={**hist, "text": text})
+    assert r.status_code == 200 and "3 dividendos cargados" in r.text
+    again = client.post(
+        "/portfolio/dividends/history", data={**hist, "text": "15/01/2026; 10; 5,00"}
+    )
+    assert "ya existían" in again.text
+    bad = client.post(
+        "/portfolio/dividends/history", data={**hist, "text": "15/04/2026; 10; 5\nxx; 10; 5"}
+    )
+    assert bad.status_code == 400 and "Línea 2" in bad.text
+    with _db() as s:
+        assert (
+            len(s.scalars(select(DividendPayment).where(DividendPayment.user_id == user.id)).all())
+            == 3
+        )
+    # aportaciones: inicial, ajuste negativo y DCA con meses atrasados
+    ok = client.post(
+        "/portfolio/contributions",
+        data={"kind": "initial", "day": "2026-01-02", "amount": "5.000"},
+        follow_redirects=False,
+    )
+    assert ok.status_code == 303
+    client.post(
+        "/portfolio/contributions", data={"kind": "adjust", "day": "2026-02-01", "amount": "-200"}
+    )
+    assert (
+        client.post(
+            "/portfolio/contributions", data={"kind": "adjust", "day": "2026-02-01", "amount": "0"}
+        ).status_code
+        == 400
+    )
+    r = client.post(
+        "/portfolio/dca",
+        data={"amount": "100", "day": "1", "start_date": "2026-08-01", "active": "1"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    page = client.get("/portfolio?tab=aportaciones").text
+    assert "DCA mensual" in page and "Valor vs aportado" in page
+    with _db() as s:
+        from app.config import today
+
+        n_dca = len(
+            s.scalars(
+                select(Contribution).where(
+                    Contribution.user_id == user.id, Contribution.kind == "dca"
+                )
+            ).all()
+        )
+        assert n_dca >= 2  # ago, sep, oct... según la fecha actual
+        total = portfolio.invested_total(s, user.id, today())
+        assert total == D("4800") + 100 * n_dca
+        assert portfolio.take_snapshot(s, user.id) is not None
+    # borrar un mes DCA no lo regenera
+    with _db() as s:
+        row = s.scalar(
+            select(Contribution).where(Contribution.user_id == user.id, Contribution.kind == "dca")
+        )
+        rid = row.id
+    client.post(f"/portfolio/contributions/{rid}/delete")
+    client.get("/portfolio?tab=aportaciones")
+    with _db() as s:
+        assert s.get(Contribution, rid) is None
+    # eliminar la posición entera: sin recálculo, conserva dividendos si se pide y lo aportado
+    with _db() as s:
+        sid = _sec(s, "AAA").id
+    r = client.post(
+        f"/portfolio/securities/{sid}/delete", data={"keep_dividends": "1"}, follow_redirects=False
+    )
+    assert r.status_code == 303 and "done=pos" in r.headers["location"]
+    with _db() as s:
+        assert not s.scalars(select(Transaction).where(Transaction.user_id == user.id)).all()
+        assert (
+            len(s.scalars(select(DividendPayment).where(DividendPayment.user_id == user.id)).all())
+            == 3
+        )
+        assert portfolio.invested_total(s, user.id) > 0
+    client.post(f"/portfolio/securities/{sid}/delete")
+    with _db() as s:
+        assert not s.scalars(
+            select(DividendPayment).where(DividendPayment.user_id == user.id)
+        ).all()
+    assert client.post("/portfolio/securities/999999/delete").status_code == 404
+
+
+def test_trades_never_change_contributed_money(client):
+    """Compras, ventas, dividendos y borrar posiciones no tocan lo aportado: solo las aportaciones."""
+    from sqlalchemy import select
+
+    from app import auth
+    from app.config import today
+    from app.models import Contribution
+
+    auth._failures.clear()
+    user = _user(client, "regla@example.com")
+    client.post(
+        "/portfolio/contributions",
+        data={"kind": "initial", "day": "2026-01-02", "amount": "1000"},
+    )
+
+    def state():
+        with _db() as s:
+            rows = s.scalars(select(Contribution).where(Contribution.user_id == user.id)).all()
+            snap = portfolio.take_snapshot(s, user.id)
+            return portfolio.invested_total(s, user.id, today()), len(rows), snap.invested
+
+    assert state() == (D("1000"), 1, D("1000"))
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50", "as_of": "2026-01-02"})
+    buy = {
+        "ident": "AAA",
+        "kind": "buy",
+        "trade_date": "2026-02-01",
+        "quantity": "5",
+        "price": "20",
+    }
+    client.post("/portfolio/transactions", data=buy)
+    client.post("/portfolio/transactions", data={**buy, "kind": "sell", "trade_date": "2026-03-01"})
+    client.post(
+        "/portfolio/dividends",
+        data={"ident": "AAA", "pay_date": "2026-03-02", "shares": "10", "gross": "30"},
+    )
+    assert state() == (D("1000"), 1, D("1000"))
+    with _db() as s:
+        sid = _sec(s, "AAA").id
+    client.post(f"/portfolio/securities/{sid}/delete")
+    assert state() == (D("1000"), 1, D("1000"))
+    client.post(
+        "/portfolio/contributions", data={"kind": "adjust", "day": "2026-04-01", "amount": "-250"}
+    )
+    assert state()[0] == D("750")
+
+
+def test_dividend_calendar_navigation(client):
+    from app import auth
+    from app.config import today
+
+    auth._failures.clear()
+    user = _user(client, "calendario@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50", "as_of": "2024-01-02"})
+    client.post(
+        "/portfolio/dividends/history",
+        data={
+            "ident": "AAA",
+            "currency": "EUR",
+            "back": "/portfolio?tab=posiciones",
+            "text": "15/03/2025; 10; 20\n15/06/2025; 10; 30\n15/03/2026; 10; 40",
+        },
+    )
+    page = client.get("/portfolio?tab=dividendos").text
+    assert "Media mensual cobrada" in page and "Dividendos por mes" in page
+    assert "12 meses antes" in page and 'class="evolution div-chart"' in page
+    old = client.get("/portfolio?tab=dividendos&start=2025-01")
+    assert old.status_code == 200 and "ene 2025 – dic 2025" in old.text and "cobrado 20" in old.text
+    assert client.get("/portfolio?tab=dividendos&start=basura").status_code == 200
+    assert client.get("/portfolio?tab=dividendos&start=1999-01").status_code == 200
+    assert client.get("/portfolio?tab=dividendos&start=2999-01").status_code == 200
+    with _db() as s:
+        pos = portfolio.positions(s, user.id)
+        cal = portfolio.dividend_calendar(s, user.id, portfolio.project_dividends(s, pos))
+        assert len(cal.months) == 12 and cal.months[0].month == today().month
+        assert cal.avg_months == 12 and 0 <= cal.avg_received_gross <= 90 / 12

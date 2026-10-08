@@ -1,0 +1,10 @@
+<form method="post" action="{{ ROOT }}/portfolio/dividends/history" class="stack">
+  <input type="hidden" name="ident" value="{{ sec_symbol }}"><input type="hidden" name="back" value="{{ back_to }}">
+  <p class="muted"><small>Un pago por línea: <code>fecha de pago; acciones; bruto; ret. origen; ret. destino; gastos; cambio a €</code> (los tres últimos y las retenciones son opcionales). Fechas <code>dd/mm/aaaa</code> o <code>aaaa-mm-dd</code>, importes en la divisa del dividendo. Todo o nada: si una línea falla no se guarda ninguna; los pagos repetidos se saltan.</small></p>
+  <textarea name="text" rows="6" required placeholder="15/03/2024; 100; 24,50; 4,65&#10;14/06/2024; 100; 24,50; 4,65"></textarea>
+  <div class="tx-form">
+    <label>Divisa<input type="text" name="currency" placeholder="{{ sec_currency or 'la del valor' }}" maxlength="3"></label>
+    <label>Cambio a € (por defecto)<input type="text" inputmode="decimal" name="fx_rate" placeholder="automático"></label>
+    <button type="submit">Cargar histórico</button>
+  </div>
+</form>
