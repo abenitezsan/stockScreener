@@ -442,11 +442,32 @@ def watchlist_page(request: Request, session: DbSession, user: WatchlistUser):
     )
 
 
+SECURITY_NOTICES = {
+    "op": "Operación guardada.",
+    "div": "Dividendo guardado.",
+}
+
+
 @router.get("/security/{symbol}", response_class=HTMLResponse)
-def security_page(request: Request, symbol: str, session: DbSession, user: CurrentUser):
+def security_page(
+    request: Request, symbol: str, session: DbSession, user: CurrentUser, done: str = ""
+):
     sec = session.scalar(select(Security).where(Security.symbol == symbol.upper()))
     if sec is None:
         raise HTTPException(404, "Valor no encontrado")
+    return render_security(request, sec, session, user, notice=SECURITY_NOTICES.get(done, ""))
+
+
+def render_security(
+    request: Request,
+    sec: Security,
+    session: Session,
+    user: User | None,
+    *,
+    notice: str = "",
+    errors: list[str] | None = None,
+    status: int = 200,
+):
     saved_item = screener.watch_item(session, user.id if user else None, sec.id)
     row = screener.watch_row(session, saved_item or WatchlistItem(security_id=sec.id))
     closes = session.execute(
@@ -471,7 +492,10 @@ def security_page(request: Request, symbol: str, session: DbSession, user: Curre
             "hard_reasons": hard_flag_reasons(session, sec, row),
             "position": portfolio.position_for(session, user.id, sec.id) if user else None,
             "today": today(),
+            "notice": notice,
+            "errors": errors or [],
         },
+        status_code=status,
     )
 
 

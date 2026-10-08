@@ -22,7 +22,7 @@ from app import heytrade, mailbox, portfolio
 from app.config import get_settings, today
 from app.jobs import latest_fx
 from app.models import Contribution, DcaPlan, DividendPayment, Security, Transaction
-from app.web import ROOT, DbSession, PortfolioUser, current_user, templates
+from app.web import ROOT, DbSession, PortfolioUser, current_user, render_security, templates
 
 router = APIRouter(dependencies=[Depends(current_user)])
 
@@ -104,6 +104,24 @@ def _chart(snaps) -> dict | None:
         "first": snaps[0].day,
         "last": snaps[-1].day,
     }
+
+
+def _from_security(session, back: str | None) -> Security | None:
+    """Valor de la ficha desde la que se envió un formulario (`back` = /security/TICKER)."""
+    target = _back(back)
+    if not target.startswith("/security/"):
+        return None
+    symbol = target.removeprefix("/security/").split("?")[0].upper()
+    return session.scalar(select(Security).where(Security.symbol == symbol))
+
+
+def _fail(request, session, user, back, errors, default_tab="importar"):
+    """Errores de un formulario: en la ficha si venía de ella; si no, en la cartera."""
+    sec = _from_security(session, back)
+    if sec is not None:
+        return render_security(request, sec, session, user, errors=errors, status=400)
+    tab = "posiciones" if _back(back).startswith("/portfolio?tab=posiciones") else default_tab
+    return _page(request, session, user, tab, errors=errors, status=400)
 
 
 def _page(
@@ -362,7 +380,7 @@ def add_manual_transaction(
         )
     except (portfolio.PortfolioError, InvalidOperation) as exc:
         session.rollback()
-        return _page(request, session, user, "importar", errors=[str(exc)], status=400)
+        return _fail(request, session, user, back, [str(exc)])
     target = _back(back)
     sep = "&" if "?" in target else "?"
     return RedirectResponse(f"{ROOT}{target}{sep}done=op", status_code=303)
@@ -379,8 +397,6 @@ def add_dividend_history(
     fx_rate: str = Form(""),
     back: str = Form(""),
 ):
-    target = _back(back)
-    tab = "posiciones" if target.startswith("/portfolio?tab=posiciones") else "importar"
     try:
         sec = portfolio.find_security(session, ident)
         if sec is None:
@@ -395,11 +411,14 @@ def add_dividend_history(
         session.rollback()
         errors, added, skipped = [str(exc)], 0, 0
     if errors:
-        return _page(request, session, user, tab, errors=errors, status=400)
+        return _fail(request, session, user, back, errors)
     note = f"{added} dividendos cargados" + (
         f"; {skipped} ya existían y se han saltado." if skipped else "."
     )
-    return _page(request, session, user, tab if tab == "posiciones" else "dividendos", notice=note)
+    from_sec = _from_security(session, back)
+    if from_sec is not None:
+        return render_security(request, from_sec, session, user, notice=note)
+    return _page(request, session, user, "dividendos", notice=note)
 
 
 @router.post("/portfolio/dividends", response_class=HTMLResponse)
@@ -439,8 +458,7 @@ def add_manual_dividend(
         )
     except (portfolio.PortfolioError, InvalidOperation) as exc:
         session.rollback()
-        tab = "posiciones" if _back(back).startswith("/portfolio?tab=posiciones") else "importar"
-        return _page(request, session, user, tab, errors=[str(exc)], status=400)
+        return _fail(request, session, user, back, [str(exc)])
     target = _back(back)
     sep = "&" if "?" in target else "?"
     return RedirectResponse(f"{ROOT}{target}{sep}done=op", status_code=303)

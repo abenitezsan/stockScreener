@@ -398,18 +398,30 @@ def test_manual_dividend(client):
     assert "AAA" in client.get("/portfolio?tab=operaciones").text
     assert client.get("/portfolio?tab=importar").status_code == 200
     assert "Añadir dividendo cobrado" in client.get("/security/AAA").text
-    page = client.get("/portfolio?tab=posiciones").text
-    assert "Añadir dividendo cobrado de AAA" in page and 'value="/portfolio?tab=posiciones"' in page
-    data = {
-        "ident": "AAA",
-        "pay_date": "2026-04-01",
-        "shares": "10",
-        "back": "/portfolio?tab=posiciones",
-    }
+    # el listado no lleva acciones: están en el detalle de la posición
+    listing = client.get("/portfolio?tab=posiciones").text
+    assert "Eliminar posición" not in listing and "Cargar histórico" not in listing
+    assert "/security/AAA" in listing
+    detail = client.get("/security/AAA").text
+    for action in (
+        "Añadir dividendo cobrado",
+        "Cargar histórico de dividendos",
+        "Eliminar posición",
+    ):
+        assert action in detail
+    back = "/security/AAA"
+    data = {"ident": "AAA", "pay_date": "2026-04-01", "shares": "10", "back": back}
     ok = client.post("/portfolio/dividends", data={**data, "gross": "5"}, follow_redirects=False)
-    assert ok.status_code == 303 and "tab=posiciones" in ok.headers["location"]
+    assert ok.status_code == 303 and ok.headers["location"].endswith("/security/AAA?done=op")
+    # los errores se muestran en la propia ficha
     bad = client.post("/portfolio/dividends", data={**data, "gross": "x"})
-    assert bad.status_code == 400 and "Posiciones" in bad.text and "no es un número" in bad.text
+    assert bad.status_code == 400 and "Mi posición" in bad.text and "no es un número" in bad.text
+    hist = client.post(
+        "/portfolio/dividends/history",
+        data={"ident": "AAA", "back": back, "text": "10/04/2026; 10; 5\n11/04/2026; 10; 5"},
+    )
+    assert hist.status_code == 200 and "2 dividendos cargados" in hist.text
+    assert "Mi posición" in hist.text
 
 
 def test_history_delete_position_and_contributions(client):
