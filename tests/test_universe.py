@@ -117,7 +117,7 @@ def test_default_sources_skip_blocked_stoxx600(monkeypatch):
     monkeypatch.setattr(universe, "upsert_universe", lambda *a: 0)
     result = universe.sync_sources(None)
     assert "STOXX600" not in result
-    assert {"SP500", "TSX60", "IBEX35", "DAX", "FTSE100", "OMXS30"} <= result.keys()
+    assert {"SP500", "TSX60", "IBEX35", "IBEXMC", "DAX", "FTSE100", "OMXS30"} <= result.keys()
     assert not any("ishares" in url for url in fetched)
 
 
@@ -161,3 +161,22 @@ def test_iseq_mnem_code_column():
     html = f"<table><tr><th>MNEM code</th><th>Company</th><th>Domicile</th></tr>{body}</table>"
     symbols = _wiki_symbols(html, TICKER_COLUMNS, lambda t: with_suffix(t, ".IR"))
     assert symbols[:2] == ["K0.IR", "K1.IR"]
+
+
+def test_ibex_medium_cap_source_spanish_columns():
+    from app import universe
+
+    assert universe.SOURCES["IBEXMC"].url == "https://es.wikipedia.org/wiki/IBEX_Medium_Cap"
+    names = "".join(f"<tr><td>BME: T{i}</td><td>Empresa {i}</td></tr>" for i in range(12))
+    html = f"<table><tr><th>Símbolo[1]</th><th>Empresa</th></tr>{names}</table>"
+    symbols = universe.SOURCES["IBEXMC"].parse(html)
+    assert symbols[:2] == ["T0.MC", "T1.MC"] and len(symbols) == 12
+    only_names = "".join(f"<tr><td>Empresa {i}</td><td>x</td></tr>" for i in range(12))
+    html = f"<table><tr><th>Empresa</th><th>Sector</th></tr>{only_names}</table>"
+    assert (
+        universe._find_column(
+            [__import__("pandas").read_html(__import__("io").StringIO(html))[0]],
+            universe.NAME_COLUMNS,
+        )[1]
+        == "Empresa"
+    )
