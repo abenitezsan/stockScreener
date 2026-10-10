@@ -9,7 +9,7 @@ el último tipo de cambio conocido.
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy import delete, func, or_, select
@@ -728,6 +728,14 @@ class LastDividend:
 
 
 @dataclass
+class NextDividend:
+    ex_date: date
+    estimated: (
+        bool  # True: calendario del último año repetido; False: ya anunciado por el proveedor
+    )
+
+
+@dataclass
 class Position:
     security: Security
     shares: Decimal = ZERO
@@ -742,6 +750,7 @@ class Position:
     fx: float | None = None
     annual_dividend_ps: float | None = None  # por acción, divisa del valor
     last_dividend: LastDividend | None = None
+    next_dividend: NextDividend | None = None
 
     @property
     def is_open(self) -> bool:
@@ -762,6 +771,12 @@ class Position:
         if self.price is None or self.previous_close is None or self.fx is None:
             return None
         return float(self.shares) * (self.price - self.previous_close) * self.fx
+
+    @property
+    def day_change_pct(self) -> float | None:
+        if self.price is None or not self.previous_close:
+            return None
+        return self.price / self.previous_close - 1
 
     @property
     def unrealized_eur(self) -> float | None:
@@ -848,6 +863,31 @@ def _last_dividend(session: Session, security_id: int) -> LastDividend | None:
     return LastDividend(rows[0][0], rows[0][1], change)
 
 
+def _next_dividend(session: Session, security_id: int, now: date) -> NextDividend | None:
+    """Próxima fecha ex-dividendo: la anunciada si existe; si no, la del calendario del último año
+    (cada pago de los últimos 12 meses, un año después) más cercana a hoy."""
+    upcoming = session.scalar(
+        select(func.min(DividendEvent.ex_date)).where(
+            DividendEvent.security_id == security_id, DividendEvent.ex_date >= now
+        )
+    )
+    if upcoming:
+        return NextDividend(upcoming, False)
+    candidates = []
+    for (ex_date,) in session.execute(
+        select(DividendEvent.ex_date).where(
+            DividendEvent.security_id == security_id,
+            DividendEvent.ex_date > now - timedelta(days=365),
+        )
+    ):
+        try:
+            candidates.append(ex_date.replace(year=ex_date.year + 1))
+        except ValueError:  # 29 de febrero
+            candidates.append(ex_date + timedelta(days=365))
+    candidates = [c for c in candidates if c >= now]
+    return NextDividend(min(candidates), True) if candidates else None
+
+
 def positions(session: Session, user_id: int, include_closed: bool = False) -> list[Position]:
     fx = latest_fx(session)
     by_sec: dict[int, Position] = {}
@@ -860,7 +900,8 @@ def positions(session: Session, user_id: int, include_closed: bool = False) -> l
     # segundo) y, si empatan, primero las operaciones
     def when(row) -> tuple:
         day = row.day if isinstance(row, CostAdjustment) else row.trade_date
-        made = row.created_at.replace(microsecond=0) if row.created_at else datetime.min  # noqa: DTZ901
+        created = row.created_at
+        made = (created is not None, created.replace(microsecond=0) if created else 0)
         return day, made, isinstance(row, CostAdjustment), row.id
 
     for t in sorted([*txs, *adjustments], key=when):
@@ -903,6 +944,7 @@ def positions(session: Session, user_id: int, include_closed: bool = False) -> l
         if val:
             pos.annual_dividend_ps = val.dividend_forward or val.dividend_ttm
         pos.last_dividend = _last_dividend(session, sec.id)
+        pos.next_dividend = _next_dividend(session, sec.id, today())
         out.append(pos)
     return sorted(out, key=lambda p: -(p.value_eur or 0))
 

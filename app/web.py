@@ -277,6 +277,7 @@ def _asset_version() -> str:
 templates.env.globals.update(
     ROOT=ROOT,
     ASSET_V=_asset_version(),
+    MONTHS_ES=["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"],
     FLAG_LABELS=FLAG_LABELS,
     HARD_FLAGS=HARD_FLAGS,
     SECTORS=SECTORS,

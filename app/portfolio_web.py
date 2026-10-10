@@ -137,7 +137,12 @@ POSITION_SORTS = {
     "shares": ("Acciones", lambda p: p.shares),
     "avg_cost": ("Coste medio", lambda p: p.avg_cost_eur),
     "price": ("Precio", lambda p: p.price),
-    "value": ("Valor €", lambda p: p.value_eur),
+    "value": ("Valoración", lambda p: p.value_eur),
+    "day": ("Hoy", lambda p: p.day_change_pct),
+    "next_dividend": (
+        "Próx. dividendo",
+        lambda p: p.next_dividend.ex_date if p.next_dividend else None,
+    ),
     "unrealized": ("Revalorización", lambda p: p.unrealized_eur),
     "total_return": ("Total return", lambda p: p.total_return_eur),
     "dividend": ("Dividendo anual", lambda p: p.annual_dividend_eur),
