@@ -366,3 +366,10 @@ tr.held > td { background: var(--held-bg) !important; }
   .positions .nm { max-width: 2.6rem; }
 }
 .positions small.est { font-size: 0.7rem; color: var(--ink-muted-text); }
+
+/* Posiciones: en móvil solo lo esencial; el resto de columnas, únicamente en pantalla grande */
+.positions .m-only { display: none; }
+@media (max-width: 767.98px) {
+  .positions .d-only { display: none; }
+  .positions .chg.m-only { display: block; }
+}
