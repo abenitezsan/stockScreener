@@ -727,3 +727,36 @@ def test_sort_positions_by_any_column(client):
         assert [p.v for p in sort_positions(rows, "t", "desc")] == [3, 2, 1, None]
     finally:
         del POSITION_SORTS["t"]
+
+
+def test_next_dividend_and_column_order(client):
+    from datetime import timedelta
+
+    from app.config import today
+    from app.models import DividendEvent
+
+    user = _user(client, "nextdiv@example.com")
+    client.post("/portfolio/positions", data={"text": "BBB.MC; 10; 18\nAAA; 5; 50"})
+    with _db() as s:
+        rows = {p.security.symbol: p for p in portfolio.positions(s, user.id)}
+        nd = rows["BBB.MC"].next_dividend  # paga en enero y julio: calendario del último año
+        assert nd and nd.estimated and nd.ex_date >= today() and nd.ex_date.month in (1, 7)
+        assert nd.ex_date <= today() + timedelta(days=366)
+        # Con un dividendo ya anunciado (fecha futura), se usa ese y no es una estimación
+        aaa = _sec(s, "AAA")
+        announced = today() + timedelta(days=9)
+        s.add(DividendEvent(security_id=aaa.id, ex_date=announced, amount=0.4))
+        s.commit()
+        try:
+            rows = {p.security.symbol: p for p in portfolio.positions(s, user.id)}
+            assert rows["AAA"].next_dividend.ex_date == announced
+            assert not rows["AAA"].next_dividend.estimated
+        finally:
+            s.query(DividendEvent).filter_by(security_id=aaa.id, ex_date=announced).delete()
+            s.commit()
+    page = client.get("/portfolio?tab=posiciones").text
+    head = page[page.index("<thead>") : page.index("</thead>")]
+    order = ["Valor</a>", "Valoración", "Yield", "Próx. div.", "Hoy", "Revalorización", "Acciones"]
+    positions = [head.index(label) for label in order]
+    assert positions == sorted(positions)  # lo esencial primero, el resto a la derecha
+    assert 'class="c-main"' in page and "<i>hoy</i>" in page and "<i>total</i>" in page

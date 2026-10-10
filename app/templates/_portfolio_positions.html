@@ -21,24 +21,30 @@
 <div class="scroll-x">
 <table class="striped positions">
   <thead><tr>
-    {% macro sorth(key, cls='') %}{% set on = sort_key == key %}{% set nxt = ('asc' if sort_dir == 'desc' else 'desc') if on else ('asc' if key == 'symbol' else 'desc') %}
-    <th class="{{ cls }}"{% if on %} aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}><a class="sort" href="{{ ROOT }}/portfolio?tab=posiciones&sort={{ key }}&dir={{ nxt }}" title="Ordenar por {{ sort_cols[key][0] }}">{{ sort_cols[key][0] }}{% if on %} {{ '▲' if sort_dir == 'asc' else '▼' }}{% endif %}</a></th>{% endmacro %}
-    {{ sorth('symbol') }}{{ sorth('shares', 'num') }}{{ sorth('avg_cost', 'num') }}{{ sorth('price', 'num') }}
-    {{ sorth('value', 'num') }}{{ sorth('unrealized', 'num') }}{{ sorth('total_return', 'num') }}
-    {{ sorth('dividend', 'num') }}{{ sorth('yield', 'num') }}{{ sorth('yoc', 'num') }}{{ sorth('last_dividend') }}
+    {% macro sorth(key, cls='', label='') %}{% set on = sort_key == key %}{% set nxt = ('asc' if sort_dir == 'desc' else 'desc') if on else ('asc' if key == 'symbol' else 'desc') %}
+    <th class="{{ cls }}"{% if on %} aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}><a class="sort" href="{{ ROOT }}/portfolio?tab=posiciones&sort={{ key }}&dir={{ nxt }}" title="Ordenar por {{ sort_cols[key][0] }}">{{ label or sort_cols[key][0] }}{% if on %} {{ '▲' if sort_dir == 'asc' else '▼' }}{% endif %}</a></th>{% endmacro %}
+    {# Primero lo esencial (el valor queda fijo al desplazar); a la derecha, el resto #}
+    {{ sorth('symbol', 'c-main') }}{{ sorth('value', 'num') }}{{ sorth('yield', 'num') }}{{ sorth('next_dividend', 'num', 'Próx. div.') }}
+    {{ sorth('day', 'num') }}{{ sorth('unrealized', 'num') }}{{ sorth('total_return', 'num') }}
+    {{ sorth('shares', 'num') }}{{ sorth('avg_cost', 'num') }}{{ sorth('price', 'num') }}
+    {{ sorth('dividend', 'num') }}{{ sorth('yoc', 'num') }}{{ sorth('last_dividend') }}
   </tr></thead>
   <tbody>
-  {% for p in rows %}{% set sec = p.security %}{% set ld = p.last_dividend %}
+  {% for p in rows %}{% set sec = p.security %}{% set ld = p.last_dividend %}{% set nd = p.next_dividend %}
     <tr>
-      <td><a href="{{ ROOT }}/security/{{ sec.symbol }}"><strong>{{ sec.symbol }}</strong></a><br><small class="muted">{{ sec.name or '' }}</small></td>
+      <td class="c-main"><a href="{{ ROOT }}/security/{{ sec.symbol }}"><strong>{{ sec.symbol }}</strong></a> <span class="nm" title="{{ sec.name or '' }}">{{ sec.name or '' }}</span></td>
+      <td class="num c-val"><strong>{{ p.value_eur | fmt('eur') }}</strong>
+        <span class="chg {{ p.day_change_pct | gain }}" title="Cambio de hoy: {{ p.day_change_eur | fmt('seur') }}"><i>hoy</i> {{ p.day_change_pct | fmt('spct') }}</span>
+        <span class="chg {{ p.unrealized_pct | gain }}" title="Cambio total: {{ p.unrealized_eur | fmt('seur') }}"><i>total</i> {{ p.unrealized_pct | fmt('spct') }}</span></td>
+      <td class="num">{{ p.current_yield | fmt('pct') }}</td>
+      <td class="num"{% if nd %} title="Fecha ex-dividendo{{ ' estimada (calendario del último año)' if nd.estimated else ' anunciada' }}: {{ nd.ex_date.strftime('%d/%m/%Y') }}"{% endif %}>{% if nd %}{{ '~' if nd.estimated }}{{ nd.ex_date.day }} {{ MONTHS_ES[nd.ex_date.month - 1] }}{% else %}–{% endif %}</td>
+      <td class="num {{ p.day_change_eur | gain }}">{{ p.day_change_eur | fmt('seur') }}</td>
+      <td class="num {{ p.unrealized_eur | gain }}">{{ p.unrealized_eur | fmt('seur') }}<br><small>{{ p.unrealized_pct | fmt('spct') }}</small></td>
+      <td class="num {{ p.total_return_eur | gain }}">{{ p.total_return_eur | fmt('seur') }}<br><small>{{ p.total_return_pct | fmt('spct') }}</small></td>
       <td class="num">{{ p.shares | fmt('qty') }}</td>
       <td class="num">{{ p.avg_cost_eur | fmt('eur') }}</td>
       <td class="num">{{ p.price | fmt }} {{ sec.currency or '' }}</td>
-      <td class="num"><strong>{{ p.value_eur | fmt('eur') }}</strong></td>
-      <td class="num {{ p.unrealized_eur | gain }}">{{ p.unrealized_eur | fmt('seur') }}<br><small>{{ p.unrealized_pct | fmt('spct') }}</small></td>
-      <td class="num {{ p.total_return_eur | gain }}">{{ p.total_return_eur | fmt('seur') }}<br><small>{{ p.total_return_pct | fmt('spct') }}</small></td>
       <td class="num">{{ p.annual_dividend_eur | fmt('eur') }}</td>
-      <td class="num">{{ p.current_yield | fmt('pct') }}</td>
       <td class="num">{{ p.yoc | fmt('pct') }}</td>
       <td>{% if ld %}{{ ld.ex_date.strftime('%d/%m/%Y') }} · {{ ld.amount | fmt }}
         {% if ld.change is not none and ld.change > 0.0005 %}<span class="pos" title="Sube {{ ld.change | fmt('pct') }}">▲ {{ ld.change | fmt('pct') }}</span>
@@ -49,7 +55,7 @@
   </tbody>
 </table>
 </div>
-<p class="muted"><small>Pulsa el encabezado de una columna para ordenar (otra vez, para invertir). Pulsa un valor para ver su detalle y gestionar su posición (añadir dividendos, cargar histórico, eliminarla). Último dividendo: fecha ex-dividendo e importe por acción en la divisa del valor, con la variación frente al anterior (Yahoo no da la fecha de anuncio). YOC = dividendo anual a cambio actual ÷ coste de la posición.</small></p>
+<p class="muted"><small>Pulsa el encabezado de una columna para ordenar (otra vez, para invertir). Pulsa un valor para ver su detalle y gestionar su posición (añadir dividendos, cargar histórico, eliminarla). Próx. div.: fecha ex-dividendo; con «~» es una estimación repitiendo el calendario del último año. Hoy y total: cambio del día y desde la compra (en € a la derecha). Último dividendo: fecha ex-dividendo e importe por acción en la divisa del valor, con la variación frente al anterior (Yahoo no da la fecha de anuncio). YOC = dividendo anual a cambio actual ÷ coste de la posición.</small></p>
 
 <div class="charts">
   {% for title, data in [('Por sector', by_sector), ('Por país', by_country), ('Por divisa', by_currency)] %}

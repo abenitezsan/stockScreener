@@ -349,3 +349,19 @@ tr.held > td { background: var(--held-bg) !important; }
   .screener tr.held > td { background: none !important; }
   .screener tr.held { background: var(--held-bg) !important; }
 }
+
+/* Posiciones: el valor queda fijo a la izquierda al desplazar la tabla en horizontal */
+.positions th.c-main, .positions td.c-main { position: sticky; left: 0; z-index: 2; background: var(--pico-background-color);
+                                             box-shadow: 1px 0 0 var(--grid); }
+.positions tbody tr:nth-child(odd) td.c-main { background: linear-gradient(var(--pico-table-row-stripped-background-color), var(--pico-table-row-stripped-background-color)), var(--pico-background-color); }
+.positions .nm { display: inline-block; max-width: 6rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+                 vertical-align: bottom; color: var(--ink-muted-text); }
+.positions td.c-val strong { display: block; }
+.positions .chg { display: block; font-size: 0.72rem; line-height: 1.3; }
+.positions .chg i { font-style: normal; color: var(--ink-muted-text); margin-right: 0.15rem; }
+@media (max-width: 767.98px) {
+  .positions { font-size: 0.78rem; }
+  .positions th, .positions td { padding: 0.35rem 0.3rem; }
+  .positions td.c-main, .positions th.c-main { padding-right: 0.45rem; }
+  .positions .nm { max-width: 2.6rem; }
+}
