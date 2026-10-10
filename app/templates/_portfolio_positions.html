@@ -18,6 +18,16 @@
 {% if s.missing_prices %}<p class="muted"><small>Sin cotización o tipo de cambio, fuera de los totales: {{ s.missing_prices | join(', ') }}.</small></p>{% endif %}
 <p class="muted"><small>Importes en {{ base_currency }}. El coste es lo que pagaste (cambio y comisiones del bróker); el valor usa el último cambio. Total return = revalorización + ventas realizadas + dividendos brutos, sobre lo invertido.</small></p>
 
+<form method="get" action="{{ ROOT }}/portfolio" class="sort-mobile pos-sort">
+  <input type="hidden" name="tab" value="posiciones">
+  <label for="pos-sort" class="muted">Ordenar</label>
+  <select id="pos-sort" name="sort" onchange="this.form.submit()">
+    {% if sort_key not in mobile_sorts | map('first') | list %}<option value="{{ sort_key }}" selected>{{ sort_label }}</option>{% endif %}
+    {% for key, text in mobile_sorts %}<option value="{{ key }}"{{ ' selected' if key == sort_key }}>{{ text }}</option>{% endfor %}
+  </select>
+  <button type="submit" name="dir" value="{{ 'asc' if sort_dir == 'desc' else 'desc' }}" class="outline"
+          aria-label="{{ 'De mayor a menor; cambiar a de menor a mayor' if sort_dir == 'desc' else 'De menor a mayor; cambiar a de mayor a menor' }}">{{ '▼' if sort_dir == 'desc' else '▲' }}</button>
+</form>
 <div class="scroll-x">
 <table class="striped positions">
   <thead><tr>

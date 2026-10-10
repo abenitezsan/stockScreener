@@ -376,3 +376,5 @@ tr.held > td { background: var(--held-bg) !important; }
 @media (max-width: 767.98px) {
   .positions .m-only.m-in { display: inline; }
 }
+.pos-sort { margin: 0 0 0.5rem; justify-content: flex-end; }
+.pos-sort button { width: auto; flex: 0 0 auto; }
