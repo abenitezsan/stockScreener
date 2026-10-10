@@ -373,3 +373,6 @@ tr.held > td { background: var(--held-bg) !important; }
   .positions .d-only { display: none; }
   .positions .chg.m-only { display: block; }
 }
+@media (max-width: 767.98px) {
+  .positions .m-only.m-in { display: inline; }
+}

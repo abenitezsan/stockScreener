@@ -21,15 +21,16 @@
 <div class="scroll-x">
 <table class="striped positions">
   <thead><tr>
-    {% macro sorth(key, cls='', label='') %}{% set on = sort_key == key %}{% set nxt = ('asc' if sort_dir == 'desc' else 'desc') if on else ('asc' if key == 'symbol' else 'desc') %}
-    <th class="{{ cls }}"{% if on %} aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}><a class="sort" href="{{ ROOT }}/portfolio?tab=posiciones&sort={{ key }}&dir={{ nxt }}" title="Ordenar por {{ sort_cols[key][0] }}">{{ label or sort_cols[key][0] }}{% if on %} {{ '▲' if sort_dir == 'asc' else '▼' }}{% endif %}</a></th>{% endmacro %}
+    {% macro sorth(key, cls='', label='', mlabel='') %}{% set on = sort_key == key %}{% set nxt = ('asc' if sort_dir == 'desc' else 'desc') if on else ('asc' if key == 'symbol' else 'desc') %}
+    <th class="{{ cls }}"{% if on %} aria-sort="{{ 'ascending' if sort_dir == 'asc' else 'descending' }}"{% endif %}><a class="sort" href="{{ ROOT }}/portfolio?tab=posiciones&sort={{ key }}&dir={{ nxt }}" title="Ordenar por {{ sort_cols[key][0] }}">{% if mlabel %}<span class="d-only">{{ label or sort_cols[key][0] }}</span><span class="m-only m-in">{{ mlabel }}</span>{% else %}{{ label or sort_cols[key][0] }}{% endif %}{% if on %} {{ '▲' if sort_dir == 'asc' else '▼' }}{% endif %}</a></th>{% endmacro %}
     {# Primero lo esencial (el valor queda fijo al desplazar); a la derecha, el resto #}
-    {{ sorth('symbol', 'c-main') }}{{ sorth('value', 'num') }}{{ sorth('yield', 'num') }}{{ sorth('next_dividend', 'num', 'Próx. div.') }}
+    {{ sorth('symbol', 'c-main') }}{{ sorth('value', 'num') }}{{ sorth('yield', 'num') }}{{ sorth('next_dividend', 'num', 'Próx. div.', 'Dividendo') }}
     {{ sorth('day', 'num d-only') }}{{ sorth('unrealized', 'num d-only') }}{{ sorth('total_return', 'num d-only') }}
     {{ sorth('shares', 'num d-only') }}{{ sorth('avg_cost', 'num d-only') }}{{ sorth('price', 'num d-only') }}
-    {{ sorth('dividend', 'num d-only') }}{{ sorth('yoc', 'num d-only') }}{{ sorth('last_dividend') }}
+    {{ sorth('dividend', 'num d-only') }}{{ sorth('yoc', 'num d-only') }}{{ sorth('last_dividend', 'd-only') }}
   </tr></thead>
   <tbody>
+  {% macro lastchg(ld) %}{% if ld.change is not none and ld.change > 0.0005 %}<span class="pos">▲ {{ ld.change | fmt('pct') }}</span>{% elif ld.change is not none and ld.change < -0.0005 %}<span class="neg">▼ {{ (-ld.change) | fmt('pct') }}</span>{% elif ld.change is not none %}<span class="muted">=</span>{% endif %}{% endmacro %}
   {% for p in rows %}{% set sec = p.security %}{% set ld = p.last_dividend %}{% set nd = p.next_dividend %}
     <tr>
       <td class="c-main"><a href="{{ ROOT }}/security/{{ sec.symbol }}"><strong>{{ sec.symbol }}</strong></a> <span class="nm" title="{{ sec.name or '' }}">{{ sec.name or '' }}</span></td>
@@ -38,7 +39,9 @@
         <span class="chg {{ p.unrealized_pct | gain }}" title="Cambio total: {{ p.unrealized_eur | fmt('seur') }}"><i>total</i> {{ p.unrealized_pct | fmt('spct') }}</span>
         <span class="chg m-only {{ p.total_return_pct | gain }}" title="Total return: {{ p.total_return_eur | fmt('seur') }}"><i>t. return</i> {{ p.total_return_pct | fmt('spct') }}</span></td>
       <td class="num">{{ p.current_yield | fmt('pct') }}</td>
-      <td class="num"{% if nd %} title="Fecha ex-dividendo{{ ' estimada (calendario del último año)' if nd.estimated else ' anunciada' }}: {{ nd.ex_date.strftime('%d/%m/%Y') }}"{% endif %}>{% if nd %}{{ nd.ex_date.day }} {{ MONTHS_ES[nd.ex_date.month - 1] }}{% if nd.estimated %} <small class="est">(est)</small>{% endif %}{% else %}–{% endif %}</td>
+      <td class="num"{% if nd %} title="Fecha ex-dividendo{{ ' estimada (calendario del último año)' if nd.estimated else ' anunciada' }}: {{ nd.ex_date.strftime('%d/%m/%Y') }}"{% endif %}>{% if nd %}{{ nd.ex_date.day }} {{ MONTHS_ES[nd.ex_date.month - 1] }}{% if nd.estimated %} <small class="est">(est)</small>{% endif %}{% else %}–{% endif %}{% if ld %}
+        <span class="chg m-only" title="Último dividendo (fecha ex): {{ ld.ex_date.strftime('%d/%m/%Y') }}"><i>últ.</i> {{ ld.ex_date.strftime('%d/%m/%y') }}</span>
+        <span class="chg m-only">{{ ld.amount | fmt }} {{ lastchg(ld) }}</span>{% endif %}</td>
       <td class="num d-only {{ p.day_change_eur | gain }}">{{ p.day_change_eur | fmt('seur') }}</td>
       <td class="num d-only {{ p.unrealized_eur | gain }}">{{ p.unrealized_eur | fmt('seur') }}<br><small>{{ p.unrealized_pct | fmt('spct') }}</small></td>
       <td class="num d-only {{ p.total_return_eur | gain }}">{{ p.total_return_eur | fmt('seur') }}<br><small>{{ p.total_return_pct | fmt('spct') }}</small></td>
@@ -47,7 +50,7 @@
       <td class="num d-only">{{ p.price | fmt }} {{ sec.currency or '' }}</td>
       <td class="num d-only">{{ p.annual_dividend_eur | fmt('eur') }}</td>
       <td class="num d-only">{{ p.yoc | fmt('pct') }}</td>
-      <td>{% if ld %}{{ ld.ex_date.strftime('%d/%m/%Y') }} · {{ ld.amount | fmt }}
+      <td class="d-only">{% if ld %}{{ ld.ex_date.strftime('%d/%m/%Y') }} · {{ ld.amount | fmt }}
         {% if ld.change is not none and ld.change > 0.0005 %}<span class="pos" title="Sube {{ ld.change | fmt('pct') }}">▲ {{ ld.change | fmt('pct') }}</span>
         {% elif ld.change is not none and ld.change < -0.0005 %}<span class="neg" title="Baja {{ (-ld.change) | fmt('pct') }}">▼ {{ (-ld.change) | fmt('pct') }}</span>
         {% elif ld.change is not none %}<span class="muted">=</span>{% endif %}{% else %}–{% endif %}</td>

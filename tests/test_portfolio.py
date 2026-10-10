@@ -762,7 +762,9 @@ def test_next_dividend_and_column_order(client):
     assert 'class="c-main"' in page and "<i>hoy</i>" in page and "<i>total</i>" in page
     assert '<small class="est">(est)</small>' in page
     # En móvil se ocultan columnas y el total return pasa a la celda de Valoración
-    assert page.count("d-only") >= 16 and "<i>t. return</i>" in page
+    assert page.count("d-only") >= 18 and "<i>t. return</i>" in page
+    # En móvil, próximo y último dividendo comparten columna
+    assert '<span class="m-only m-in">Dividendo</span>' in page and "<i>últ.</i>" in page
     for label in (
         "Hoy",
         "Revalorización",
