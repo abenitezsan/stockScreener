@@ -762,7 +762,9 @@ def test_next_dividend_and_column_order(client):
     assert 'class="c-main"' in page and "<i>hoy</i>" in page and "<i>total</i>" in page
     assert '<small class="est">(est)</small>' in page
     # En móvil se ocultan columnas y el total return pasa a la celda de Valoración
-    assert page.count("d-only") >= 16 and "<i>t. return</i>" in page
+    assert page.count("d-only") >= 18 and "<i>t. return</i>" in page
+    # En móvil, próximo y último dividendo comparten columna
+    assert '<span class="m-only m-in">Dividendo</span>' in page and "<i>últ.</i>" in page
     for label in (
         "Hoy",
         "Revalorización",
@@ -776,3 +778,42 @@ def test_next_dividend_and_column_order(client):
         assert (
             f'title="Ordenar por {label}"' in page
         )  # siguen en la versión de escritorio  # fecha estimada, marcada como tal
+
+
+def test_mobile_sort_selector(client):
+    import re
+
+    from app.portfolio_web import EXTRA_SORTS, MOBILE_SORTS, POSITION_SORTS, sort_positions
+
+    user = _user(client, "movilsort@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 5; 40\nBBB.MC; 10; 18\nCCC.L; 3; 40"})
+
+    def tickers(query):
+        page = client.get(f"/portfolio?tab=posiciones&{query}").text
+        body = page[page.index("<tbody>") :]
+        return re.findall(r"<strong>([A-Z.]+)</strong></a>", body)
+
+    page = client.get("/portfolio?tab=posiciones").text
+    assert (
+        'id="pos-sort"' in page and 'class="sort-mobile pos-sort"' in page
+    )  # solo visible en móvil
+    for key, text in MOBILE_SORTS:
+        assert (
+            (key in POSITION_SORTS or key in EXTRA_SORTS)
+            and f'<option value="{key}"' in page
+            and text in page
+        )
+    with _db() as s:
+        rows = portfolio.positions(s, user.id)
+    for key in ("day", "unrealized_pct", "total_return_pct", "value", "yield", "next_dividend"):
+        for direction in ("asc", "desc"):
+            expected = [p.security.symbol for p in sort_positions(rows, key, direction)]
+            assert tickers(f"sort={key}&dir={direction}") == expected, (key, direction)
+    # El selector refleja el orden activo y el botón alterna la dirección
+    active = client.get("/portfolio?tab=posiciones&sort=unrealized_pct&dir=asc").text
+    assert (
+        '<option value="unrealized_pct" selected>' in active and 'name="dir" value="desc"' in active
+    )
+    # Una clave de columna de escritorio activa se conserva en el selector
+    other = client.get("/portfolio?tab=posiciones&sort=shares&dir=asc").text
+    assert '<option value="shares" selected>Acciones</option>' in other

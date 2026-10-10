@@ -153,14 +153,36 @@ POSITION_SORTS = {
         lambda p: p.last_dividend.ex_date if p.last_dividend else None,
     ),
 }
+# Solo para el selector de móvil (en escritorio no hay columna para ellas): rentabilidades en %
+EXTRA_SORTS = {
+    "unrealized_pct": ("Cambio total (%)", lambda p: p.unrealized_pct),
+    "total_return_pct": ("Total return (%)", lambda p: p.total_return_pct),
+}
+
+# Opciones del selector «Ordenar» de móvil: (clave, texto)
+MOBILE_SORTS = [
+    ("value", "Valoración (€)"),
+    ("day", "Cambio hoy (%)"),
+    ("unrealized_pct", "Cambio total (%)"),
+    ("total_return_pct", "Total return (%)"),
+    ("yield", "Yield"),
+    ("next_dividend", "Próximo dividendo"),
+    ("symbol", "Ticker (A→Z)"),
+]
 TEXT_SORTS = {"symbol"}  # se ordenan A→Z por defecto; el resto, de mayor a menor
+
+
+def _sort_spec(key: str):
+    """(título, función) de una clave de ordenación: columnas de la tabla o rentabilidades %."""
+    return POSITION_SORTS.get(key) or EXTRA_SORTS.get(key)
 
 
 def sort_positions(rows: list, key: str, direction: str) -> list:
     """Ordena por la columna elegida; los valores sin dato van siempre al final."""
-    if key not in POSITION_SORTS:
+    spec = _sort_spec(key)
+    if spec is None:
         return rows
-    getter = POSITION_SORTS[key][1]
+    getter = spec[1]
     with_value = [(getter(p), p) for p in rows if getter(p) is not None]
     without = [p for p in rows if getter(p) is None]
     with_value.sort(key=lambda item: item[0], reverse=direction == "desc")
@@ -215,7 +237,7 @@ def _page(
         )
         ctx["chart"] = _chart(portfolio.snapshot_series(session, user.id))
     if tab == "posiciones":
-        sort_key = sort if sort in POSITION_SORTS else "value"
+        sort_key = sort if _sort_spec(sort) else "value"
         direction = (
             direction
             if direction in ("asc", "desc")
@@ -223,6 +245,8 @@ def _page(
         )
         ctx["rows"] = sort_positions(open_rows, sort_key, direction)
         ctx["sort_key"], ctx["sort_dir"], ctx["sort_cols"] = sort_key, direction, POSITION_SORTS
+        ctx["mobile_sorts"] = MOBILE_SORTS
+        ctx["sort_label"] = _sort_spec(sort_key)[0]
         ctx["by_sector"] = portfolio.allocation(open_rows, lambda p: p.security.sector)
         ctx["by_country"] = portfolio.allocation(open_rows, lambda p: p.security.country)
         ctx["by_currency"] = portfolio.allocation(open_rows, lambda p: p.security.currency)
