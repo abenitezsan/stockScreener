@@ -9,7 +9,7 @@ el último tipo de cambio conocido.
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy import delete, func, or_, select
@@ -900,7 +900,8 @@ def positions(session: Session, user_id: int, include_closed: bool = False) -> l
     # segundo) y, si empatan, primero las operaciones
     def when(row) -> tuple:
         day = row.day if isinstance(row, CostAdjustment) else row.trade_date
-        made = row.created_at.replace(microsecond=0) if row.created_at else datetime.min  # noqa: DTZ901
+        created = row.created_at
+        made = (created is not None, created.replace(microsecond=0) if created else 0)
         return day, made, isinstance(row, CostAdjustment), row.id
 
     for t in sorted([*txs, *adjustments], key=when):
