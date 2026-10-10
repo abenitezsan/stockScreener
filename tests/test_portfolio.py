@@ -760,4 +760,19 @@ def test_next_dividend_and_column_order(client):
     positions = [head.index(label) for label in order]
     assert positions == sorted(positions)  # lo esencial primero, el resto a la derecha
     assert 'class="c-main"' in page and "<i>hoy</i>" in page and "<i>total</i>" in page
-    assert '<small class="est">(est)</small>' in page  # fecha estimada, marcada como tal
+    assert '<small class="est">(est)</small>' in page
+    # En móvil se ocultan columnas y el total return pasa a la celda de Valoración
+    assert page.count("d-only") >= 16 and "<i>t. return</i>" in page
+    for label in (
+        "Hoy",
+        "Revalorización",
+        "Total return",
+        "Acciones",
+        "Coste medio",
+        "Precio",
+        "Dividendo anual",
+        "YOC",
+    ):
+        assert (
+            f'title="Ordenar por {label}"' in page
+        )  # siguen en la versión de escritorio  # fecha estimada, marcada como tal
