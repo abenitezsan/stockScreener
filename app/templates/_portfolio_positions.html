@@ -37,7 +37,7 @@
         <span class="chg {{ p.day_change_pct | gain }}" title="Cambio de hoy: {{ p.day_change_eur | fmt('seur') }}"><i>hoy</i> {{ p.day_change_pct | fmt('spct') }}</span>
         <span class="chg {{ p.unrealized_pct | gain }}" title="Cambio total: {{ p.unrealized_eur | fmt('seur') }}"><i>total</i> {{ p.unrealized_pct | fmt('spct') }}</span></td>
       <td class="num">{{ p.current_yield | fmt('pct') }}</td>
-      <td class="num"{% if nd %} title="Fecha ex-dividendo{{ ' estimada (calendario del último año)' if nd.estimated else ' anunciada' }}: {{ nd.ex_date.strftime('%d/%m/%Y') }}"{% endif %}>{% if nd %}{{ '~' if nd.estimated }}{{ nd.ex_date.day }} {{ MONTHS_ES[nd.ex_date.month - 1] }}{% else %}–{% endif %}</td>
+      <td class="num"{% if nd %} title="Fecha ex-dividendo{{ ' estimada (calendario del último año)' if nd.estimated else ' anunciada' }}: {{ nd.ex_date.strftime('%d/%m/%Y') }}"{% endif %}>{% if nd %}{{ nd.ex_date.day }} {{ MONTHS_ES[nd.ex_date.month - 1] }}{% if nd.estimated %} <small class="est">(est)</small>{% endif %}{% else %}–{% endif %}</td>
       <td class="num {{ p.day_change_eur | gain }}">{{ p.day_change_eur | fmt('seur') }}</td>
       <td class="num {{ p.unrealized_eur | gain }}">{{ p.unrealized_eur | fmt('seur') }}<br><small>{{ p.unrealized_pct | fmt('spct') }}</small></td>
       <td class="num {{ p.total_return_eur | gain }}">{{ p.total_return_eur | fmt('seur') }}<br><small>{{ p.total_return_pct | fmt('spct') }}</small></td>
@@ -55,7 +55,7 @@
   </tbody>
 </table>
 </div>
-<p class="muted"><small>Pulsa el encabezado de una columna para ordenar (otra vez, para invertir). Pulsa un valor para ver su detalle y gestionar su posición (añadir dividendos, cargar histórico, eliminarla). Próx. div.: fecha ex-dividendo; con «~» es una estimación repitiendo el calendario del último año. Hoy y total: cambio del día y desde la compra (en € a la derecha). Último dividendo: fecha ex-dividendo e importe por acción en la divisa del valor, con la variación frente al anterior (Yahoo no da la fecha de anuncio). YOC = dividendo anual a cambio actual ÷ coste de la posición.</small></p>
+<p class="muted"><small>Pulsa el encabezado de una columna para ordenar (otra vez, para invertir). Pulsa un valor para ver su detalle y gestionar su posición (añadir dividendos, cargar histórico, eliminarla). Próx. div.: fecha ex-dividendo; si no hay fecha anunciada se estima repitiendo el calendario del último año y se marca «(est)». Hoy y total: cambio del día y desde la compra (en € a la derecha). Último dividendo: fecha ex-dividendo e importe por acción en la divisa del valor, con la variación frente al anterior (Yahoo no da la fecha de anuncio). YOC = dividendo anual a cambio actual ÷ coste de la posición.</small></p>
 
 <div class="charts">
   {% for title, data in [('Por sector', by_sector), ('Por país', by_country), ('Por divisa', by_currency)] %}

@@ -365,3 +365,4 @@ tr.held > td { background: var(--held-bg) !important; }
   .positions td.c-main, .positions th.c-main { padding-right: 0.45rem; }
   .positions .nm { max-width: 2.6rem; }
 }
+.positions small.est { font-size: 0.7rem; color: var(--ink-muted-text); }

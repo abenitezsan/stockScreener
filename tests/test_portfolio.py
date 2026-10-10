@@ -760,3 +760,4 @@ def test_next_dividend_and_column_order(client):
     positions = [head.index(label) for label in order]
     assert positions == sorted(positions)  # lo esencial primero, el resto a la derecha
     assert 'class="c-main"' in page and "<i>hoy</i>" in page and "<i>total</i>" in page
+    assert '<small class="est">(est)</small>' in page  # fecha estimada, marcada como tal
