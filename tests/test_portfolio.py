@@ -50,6 +50,16 @@ def test_parse_foreign_dividend_origin_withholding():
     assert doc.currency == "USD" and doc.fx_rate is None and doc.net_base is None
 
 
+def test_parse_foreign_dividend_with_fx_and_domestic_withholding():
+    doc = heytrade.parse_dividend(text("dividend_us_eur.txt"))
+    assert (doc.currency, doc.shares, doc.gross) == ("USD", D(42), D("11.40"))
+    assert doc.withholding_origin == D("1.71")
+    assert doc.withholding_domestic == D("1.84")  # 1,64 EUR pasados a USD
+    assert doc.net_base == D("6.99") and doc.fx_rate == D("0.890309")
+    assert doc.withholding_rate == D("0.15")
+    assert (doc.ex_date, doc.pay_date) == (date(2026, 9, 30), date(2026, 10, 16))
+
+
 def test_parse_errors():
     with pytest.raises(heytrade.ParseError):
         heytrade.pdf_text(b"no soy un pdf")
