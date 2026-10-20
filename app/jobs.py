@@ -3,7 +3,7 @@
 import logging
 import time
 from collections.abc import Iterator, Sequence
-from datetime import timedelta
+from datetime import date, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert
@@ -66,13 +66,13 @@ def _upsert(session: Session, model, rows: list[dict], keys: list[str]) -> None:
     session.execute(stmt.on_conflict_do_update(index_elements=keys, set_=columns))
 
 
-def latest_fx(session: Session) -> dict[str, float]:
-    """Último tipo de cambio conocido por divisa (unidades de divisa base por unidad)."""
-    latest = (
-        select(FxRate.currency, func.max(FxRate.day).label("day"))
-        .group_by(FxRate.currency)
-        .subquery()
-    )
+def latest_fx(session: Session, before: date | None = None) -> dict[str, float]:
+    """Último tipo de cambio conocido por divisa (unidades de divisa base por unidad). Con
+    `before`, el último de un día anterior a esa fecha (el cambio con el que cerró aquel día)."""
+    latest_q = select(FxRate.currency, func.max(FxRate.day).label("day")).group_by(FxRate.currency)
+    if before is not None:
+        latest_q = latest_q.where(FxRate.day < before)
+    latest = latest_q.subquery()
     rows = session.execute(
         select(FxRate.currency, FxRate.rate_to_base).join(
             latest, (FxRate.currency == latest.c.currency) & (FxRate.day == latest.c.day)
