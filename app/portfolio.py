@@ -724,7 +724,7 @@ def parse_positions(session: Session, text: str) -> tuple[list[tuple], list[str]
 class LastDividend:
     ex_date: date
     amount: float  # por acción, en la divisa del valor
-    change: float | None  # variación frente al anterior
+    change: float | None  # variación frente al mismo pago del año anterior
 
 
 @dataclass
@@ -909,16 +909,25 @@ class Summary:
 
 
 def _last_dividend(session: Session, security_id: int) -> LastDividend | None:
+    """Último dividendo y su variación frente al mismo pago del año anterior (el más cercano a
+    hace 12 meses, con 75 días de margen). Comparar con el pago inmediatamente anterior mezcla
+    pagos distintos (a cuenta y complementario) y da bajadas o subidas que no existen."""
     rows = session.execute(
         select(DividendEvent.ex_date, DividendEvent.amount)
         .where(DividendEvent.security_id == security_id)
         .order_by(DividendEvent.ex_date.desc())
-        .limit(2)
+        .limit(12)
     ).all()
     if not rows:
         return None
-    change = rows[0][1] / rows[1][1] - 1 if len(rows) > 1 and rows[1][1] else None
-    return LastDividend(rows[0][0], rows[0][1], change)
+    (ex_date, amount), older = rows[0], rows[1:]
+    target = ex_date - timedelta(days=365)
+    year_ago = min(
+        (r for r in older if r[1] and abs((r[0] - target).days) <= 75),
+        key=lambda r: abs((r[0] - target).days),
+        default=None,
+    )
+    return LastDividend(ex_date, amount, amount / year_ago[1] - 1 if year_ago else None)
 
 
 def _next_dividend(session: Session, security_id: int, now: date) -> NextDividend | None:
