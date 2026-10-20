@@ -827,3 +827,65 @@ def test_mobile_sort_selector(client):
     # Una clave de columna de escritorio activa se conserva en el selector
     other = client.get("/portfolio?tab=posiciones&sort=shares&dir=asc").text
     assert '<option value="shares" selected>Acciones</option>' in other
+
+
+def test_day_change_splits_price_and_fx_in_spanish_day(client):
+    from datetime import UTC, datetime, timedelta
+
+    from app.config import today
+    from app.models import FxRate, Quote
+
+    user = _user(client, "fxday@example.com")
+    with _db() as s:
+        aaa = _sec(s, "AAA")  # USD
+        portfolio.add_transaction(
+            s,
+            user.id,
+            aaa,
+            kind="buy",
+            trade_date=date(2026, 1, 5),
+            quantity=D(10),
+            total_eur=D(500),
+            price=D(60),
+            currency="USD",
+            fx_rate=D("0.80"),
+        )
+        quote = s.get(Quote, aaa.id)
+        saved = (quote.price, quote.previous_close, quote.as_of)
+        today_utc = datetime.combine(today(), datetime.min.time(), tzinfo=UTC)
+        quote.price, quote.previous_close, quote.as_of = 110.0, 100.0, today_utc
+        old_fx = {
+            r.day: r.rate_to_base
+            for r in s.query(FxRate).filter_by(currency="USD").all()
+            if r.day >= today() - timedelta(days=1)
+        }
+        for day, rate in ((today() - timedelta(days=1), 0.90), (today(), 0.88)):
+            s.merge(FxRate(day=day, currency="USD", rate_to_base=rate))
+        s.commit()
+        try:
+            (pos,) = portfolio.positions(s, user.id)
+            assert pos.prev_fx == pytest.approx(0.90) and pos.fx == pytest.approx(0.88)
+            assert pos.day_price_eur == pytest.approx(10 * 10 * 0.90)  # precio, al cambio de ayer
+            assert pos.day_fx_eur == pytest.approx(10 * 110 * (0.88 - 0.90))  # divisa
+            assert pos.day_change_eur == pytest.approx(10 * (110 * 0.88 - 100 * 0.90))
+            assert pos.day_change_pct == pytest.approx(pos.day_change_eur / 900)
+            assert pos.fx_total_eur == pytest.approx(10 * 110 * (0.88 - 0.80))
+            summary = portfolio.summarize([pos])
+            (line,) = summary.fx_lines
+            assert line.currency == "USD" and line.day_pct == pytest.approx(0.88 / 0.90 - 1)
+            assert summary.day_change_eur == pytest.approx(
+                summary.day_price_eur + summary.day_fx_eur
+            )
+            assert "Efecto del tipo de cambio" in client.get("/portfolio?tab=posiciones").text
+
+            # Si la última sesión es anterior a hoy (hora española), hoy no se ha movido el precio
+            quote.as_of = today_utc - timedelta(days=1)
+            s.commit()
+            (pos,) = portfolio.positions(s, user.id)
+            assert pos.day_price_eur == pytest.approx(0)
+        finally:
+            quote.price, quote.previous_close, quote.as_of = saved
+            s.query(FxRate).filter(FxRate.day >= today() - timedelta(days=1)).delete()
+            for day, rate in old_fx.items():
+                s.add(FxRate(day=day, currency="USD", rate_to_base=rate))
+            s.commit()

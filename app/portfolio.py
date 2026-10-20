@@ -748,6 +748,11 @@ class Position:
     price: float | None = None  # divisa del valor
     previous_close: float | None = None
     fx: float | None = None
+    prev_fx: float | None = None  # cambio al cierre del día anterior (hora española)
+    month_fx: float | None = None  # cambio de hace ~30 días
+    bought_today: Decimal = ZERO  # comprado hoy: no cuenta para el cambio del día
+    cost_local: Decimal = ZERO  # coste de las acciones en la divisa del valor
+    cost_fx_eur: Decimal = ZERO  # ese coste valorado al cambio de cada compra, en EUR
     annual_dividend_ps: float | None = None  # por acción, divisa del valor
     last_dividend: LastDividend | None = None
     next_dividend: NextDividend | None = None
@@ -767,16 +772,47 @@ class Position:
         return float(self.shares) * self.price * self.fx
 
     @property
-    def day_change_eur(self) -> float | None:
-        if self.price is None or self.previous_close is None or self.fx is None:
+    def _start_shares(self) -> float:
+        return float(max(self.shares - self.bought_today, ZERO))
+
+    @property
+    def prev_value_eur(self) -> float | None:
+        """Valor al cierre del día anterior (hora española), con el cambio de entonces."""
+        if self.previous_close is None or self.prev_fx is None:
             return None
-        return float(self.shares) * (self.price - self.previous_close) * self.fx
+        return self._start_shares * self.previous_close * self.prev_fx
+
+    @property
+    def day_price_eur(self) -> float | None:
+        """Cambio de hoy por el precio del valor, al cambio de ayer."""
+        if self.price is None or self.previous_close is None or self.prev_fx is None:
+            return None
+        return self._start_shares * (self.price - self.previous_close) * self.prev_fx
+
+    @property
+    def day_fx_eur(self) -> float | None:
+        """Cambio de hoy por el tipo de cambio de la divisa, al precio de hoy."""
+        if self.price is None or self.fx is None or self.prev_fx is None:
+            return None
+        return self._start_shares * self.price * (self.fx - self.prev_fx)
+
+    @property
+    def day_change_eur(self) -> float | None:
+        price, fx = self.day_price_eur, self.day_fx_eur
+        return None if price is None or fx is None else price + fx
 
     @property
     def day_change_pct(self) -> float | None:
-        if self.price is None or not self.previous_close:
+        change, prev = self.day_change_eur, self.prev_value_eur
+        return change / prev if change is not None and prev else None
+
+    @property
+    def fx_total_eur(self) -> float | None:
+        """Parte de la revalorización debida al cambio desde la compra (aproximada)."""
+        if self.price is None or self.fx is None or self.cost_local <= 0:
             return None
-        return self.price / self.previous_close - 1
+        buy_fx = float(self.cost_fx_eur / self.cost_local)
+        return float(self.shares) * self.price * (self.fx - buy_fx)
 
     @property
     def unrealized_eur(self) -> float | None:
@@ -820,10 +856,28 @@ class Position:
 
 
 @dataclass
+class FxLine:
+    """Efecto de una divisa extranjera en la cartera."""
+
+    currency: str
+    rate: float  # EUR por unidad
+    day_pct: float | None  # frente al cierre de ayer
+    month_pct: float | None  # frente a hace ~30 días
+    value_eur: float = 0.0
+    day_eur: float = 0.0
+    total_eur: float = 0.0
+
+
+@dataclass
 class Summary:
     value_eur: float = 0.0
     cost_eur: float = 0.0
     day_change_eur: float = 0.0
+    day_price_eur: float = 0.0
+    day_fx_eur: float = 0.0
+    day_prev_eur: float = 0.0
+    fx_total_eur: float = 0.0
+    fx_lines: list["FxLine"] = field(default_factory=list)
     unrealized_eur: float = 0.0
     realized_eur: float = 0.0
     dividends_gross_eur: float = 0.0
@@ -832,6 +886,10 @@ class Summary:
     invested_eur: float = 0.0
     annual_dividend_eur: float = 0.0
     missing_prices: list[str] = field(default_factory=list)
+
+    @property
+    def day_change_pct(self) -> float | None:
+        return self.day_change_eur / self.day_prev_eur if self.day_prev_eur else None
 
     @property
     def unrealized_pct(self) -> float | None:
@@ -890,6 +948,8 @@ def _next_dividend(session: Session, security_id: int, now: date) -> NextDividen
 
 def positions(session: Session, user_id: int, include_closed: bool = False) -> list[Position]:
     fx = latest_fx(session)
+    prev_fx = latest_fx(session, before=today())
+    month_fx = latest_fx(session, before=today() - timedelta(days=29))
     by_sec: dict[int, Position] = {}
     txs = session.scalars(select(Transaction).where(Transaction.user_id == user_id)).all()
     adjustments = session.scalars(
@@ -915,12 +975,21 @@ def positions(session: Session, user_id: int, include_closed: bool = False) -> l
         if pos is None:
             pos = by_sec[t.security_id] = Position(session.get(Security, t.security_id))
         if t.kind == "buy":
+            local = t.quantity * t.price if t.price else t.total_eur / t.fx_rate
             pos.shares += t.quantity
             pos.cost_eur += t.total_eur
             pos.invested_eur += t.total_eur
+            pos.cost_local += local
+            pos.cost_fx_eur += local * t.fx_rate
+            if t.trade_date >= today():
+                pos.bought_today += t.quantity
         else:
             avg = pos.cost_eur / pos.shares if pos.shares else ZERO
             removed = avg * t.quantity
+            if pos.shares:
+                keep = 1 - t.quantity / pos.shares
+                pos.cost_local *= keep
+                pos.cost_fx_eur *= keep
             pos.shares -= t.quantity
             pos.cost_eur -= removed
             pos.sold_eur += t.total_eur
@@ -940,7 +1009,13 @@ def positions(session: Session, user_id: int, include_closed: bool = False) -> l
         val = session.get(Valuation, sec.id)
         pos.price = quote.price if quote else None
         pos.previous_close = quote.previous_close if quote else None
+        if quote and quote.as_of and quote.as_of.date() < today():
+            # La última sesión es anterior a hoy (hora española): hoy aún no se ha movido nada
+            pos.previous_close = quote.price
         pos.fx = fx.get(sec.currency) if sec.currency else None
+        # Sin histórico de cambio de ayer, se toma el actual (efecto divisa cero)
+        pos.prev_fx = prev_fx.get(sec.currency, pos.fx) if sec.currency else None
+        pos.month_fx = month_fx.get(sec.currency) if sec.currency else None
         if val:
             pos.annual_dividend_ps = val.dividend_forward or val.dividend_ttm
         pos.last_dividend = _last_dividend(session, sec.id)
@@ -951,6 +1026,7 @@ def positions(session: Session, user_id: int, include_closed: bool = False) -> l
 
 def summarize(rows: list[Position]) -> Summary:
     s = Summary()
+    lines: dict[str, FxLine] = {}
     for p in rows:
         s.realized_eur += float(p.realized_eur)
         s.dividends_gross_eur += float(p.dividends_gross_eur)
@@ -965,9 +1041,27 @@ def summarize(rows: list[Position]) -> Summary:
         s.value_eur += p.value_eur
         s.cost_eur += float(p.cost_eur)
         s.day_change_eur += p.day_change_eur or 0.0
+        s.day_price_eur += p.day_price_eur or 0.0
+        s.day_fx_eur += p.day_fx_eur or 0.0
+        s.day_prev_eur += p.prev_value_eur or 0.0
+        s.fx_total_eur += p.fx_total_eur or 0.0
+        cur = p.security.currency
+        if cur and cur != get_settings().base_currency and p.fx:
+            line = lines.get(cur)
+            if line is None:
+                line = lines[cur] = FxLine(
+                    cur,
+                    p.fx,
+                    p.fx / p.prev_fx - 1 if p.prev_fx else None,
+                    p.fx / p.month_fx - 1 if p.month_fx else None,
+                )
+            line.value_eur += p.value_eur
+            line.day_eur += p.day_fx_eur or 0.0
+            line.total_eur += p.fx_total_eur or 0.0
         s.unrealized_eur += p.unrealized_eur or 0.0
         s.annual_dividend_eur += p.annual_dividend_eur or 0.0
         s.total_return_eur += p.total_return_eur or 0.0
+    s.fx_lines = sorted(lines.values(), key=lambda line: -line.value_eur)
     return s
 
 
