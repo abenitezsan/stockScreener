@@ -889,3 +889,31 @@ def test_day_change_splits_price_and_fx_in_spanish_day(client):
             for day, rate in old_fx.items():
                 s.add(FxRate(day=day, currency="USD", rate_to_base=rate))
             s.commit()
+
+
+def test_last_dividend_change_compares_same_payment_last_year(client):
+    from app.models import DividendEvent, Security
+
+    with _db() as s:
+        sec = Security(symbol="LOGI.TEST", name="Logi", region="ES", currency="EUR")
+        s.add(sec)
+        s.flush()
+        # Pago grande (febrero) y pequeño (julio) cada año: el último sube un 10 % frente a su
+        # equivalente de hace un año aunque sea mucho menor que el pago inmediatamente anterior
+        for ex_date, amount in (
+            (date(2024, 2, 1), 1.00),
+            (date(2024, 7, 1), 0.40),
+            (date(2025, 2, 1), 1.10),
+            (date(2025, 7, 1), 0.44),
+        ):
+            s.add(DividendEvent(security_id=sec.id, ex_date=ex_date, amount=amount))
+        s.commit()
+        last = portfolio._last_dividend(s, sec.id)
+        assert last.ex_date == date(2025, 7, 1)
+        assert last.change == pytest.approx(0.10)
+        s.add(DividendEvent(security_id=sec.id, ex_date=date(2025, 11, 1), amount=0.2))
+        s.commit()
+        assert portfolio._last_dividend(s, sec.id).change is None  # sin pago equivalente
+        s.query(DividendEvent).filter_by(security_id=sec.id).delete()
+        s.delete(sec)
+        s.commit()
