@@ -990,3 +990,57 @@ def test_dividends_by_pay_date_and_month_list(client):
     assert len(re.findall(r'data-div-list="[\d-]+" hidden', page)) == 11  # solo el mes actual
     other = client.get(f"/portfolio?tab=dividendos&mes={later}").text
     assert f'data-div-list="{later}">' in other
+
+
+def test_provider_dividend_dates_fix_pay_date(client):
+    """El calendario del proveedor (fecha ex y de pago) se guarda y la proyección lo usa."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app import jobs
+    from app.config import today
+    from app.models import DividendDate, DividendEvent
+    from tests.fake_provider import PAY_LAG, FakeProvider
+
+    now = today()
+    user = _user(client, "calendario-yahoo@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50"})
+    provider = FakeProvider()
+    with _db() as s:
+        aaa = _sec(s, "AAA")
+        held = {sec.symbol for sec in jobs.held_securities(s)}
+        assert "AAA" in held and "DDD" not in held
+        assert jobs.refresh_dividend_dates(s, provider) >= 1
+        ex, pay = provider.get_dividend_dates("AAA")
+        assert s.get(DividendDate, (aaa.id, ex)).pay_date == pay
+
+        # El anunciado fija fechas del pago repetido; el importe sigue siendo estimado
+        (pos,) = portfolio.positions(s, user.id)
+        assert pos.next_dividend.ex_date == ex and not pos.next_dividend.estimated
+        proj = portfolio.project_dividends(s, [pos])
+        (item,) = [i for i in proj.items if i.ex_date == ex]
+        assert item.pay_date == pay and not item.pay_estimated and item.estimated
+        # El resto de pagos usa el retraso habitual (cobros registrados y calendario del proveedor)
+        lag = portfolio._pay_lags(s, [aaa.id])[aaa.id]
+        others = [i for i in proj.items if i.ex_date != ex and i.pay_estimated]
+        assert others and all(abs((i.pay_date - i.ex_date).days - lag) <= 1 for i in others)
+
+        # Si el dividendo ya está en el histórico, también se guarda allí su fecha de pago
+        last_ex = s.scalar(
+            select(DividendEvent.ex_date)
+            .where(DividendEvent.security_id == aaa.id, DividendEvent.ex_date <= now)
+            .order_by(DividendEvent.ex_date.desc())
+        )
+
+        class Past(FakeProvider):
+            def get_dividend_dates(self, symbol):
+                return last_ex, last_ex + timedelta(days=PAY_LAG)
+
+        assert jobs.refresh_dividend_dates(s, Past(), symbols=["AAA"]) == 1
+        event = s.scalar(
+            select(DividendEvent).where(
+                DividendEvent.security_id == aaa.id, DividendEvent.ex_date == last_ex
+            )
+        )
+        assert event.pay_date == last_ex + timedelta(days=PAY_LAG)

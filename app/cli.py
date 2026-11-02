@@ -28,6 +28,7 @@ TASKS = {
     "history": jobs.refresh_history,
     "quotes": jobs.refresh_quotes,
     "financials": jobs.refresh_financials,
+    "dividend-dates": jobs.refresh_dividend_dates,
     "valuations": jobs.recompute_valuations,
 }
 # Orden de la carga inicial completa

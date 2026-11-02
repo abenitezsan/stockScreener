@@ -5,7 +5,7 @@ import time
 from collections.abc import Iterator, Sequence
 from datetime import date, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select, update
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,7 @@ from app.analysis import sectors
 from app.analysis.valuation import AnnualFinancials, Inputs, Params, compute
 from app.config import get_settings, today
 from app.models import (
+    DividendDate,
     DividendEvent,
     FinancialsAnnual,
     Fundamentals,
@@ -20,6 +21,7 @@ from app.models import (
     PriceHistory,
     Quote,
     Security,
+    Transaction,
     Valuation,
 )
 from app.providers import MarketDataProvider, get_provider
@@ -361,6 +363,57 @@ def recompute_valuations(session: Session, symbols: Sequence[str] | None = None)
     return count
 
 
+def held_securities(session: Session) -> list[Security]:
+    """Valores que alguien tiene en cartera (acciones compradas menos vendidas > 0)."""
+    net = func.sum(
+        case((Transaction.kind == "buy", Transaction.quantity), else_=-Transaction.quantity)
+    )
+    ids = select(Transaction.security_id).group_by(Transaction.security_id).having(net > 0)
+    return list(
+        session.scalars(select(Security).where(Security.id.in_(ids)).order_by(Security.symbol))
+    )
+
+
+def refresh_dividend_dates(
+    session: Session,
+    provider: MarketDataProvider | None = None,
+    symbols: Sequence[str] | None = None,
+) -> int:
+    """Fecha de pago del próximo dividendo (calendario del proveedor) de los valores en cartera.
+    Una petición por valor, por eso no se hace con todo el universo. Las fechas se acumulan en
+    `DividendDate` y, si el dividendo ya está en el histórico, también en `DividendEvent`."""
+    provider = provider or get_provider()
+    settings = get_settings()
+    securities = _securities(session, symbols) if symbols else held_securities(session)
+    count = 0
+    for sec in securities:
+        try:
+            dates = provider.get_dividend_dates(sec.symbol)
+        except Exception:
+            log.exception("Error descargando el calendario de dividendos de %s", sec.symbol)
+            continue
+        finally:
+            time.sleep(settings.request_delay)
+        if dates is None:
+            continue
+        ex, pay = dates
+        _upsert(
+            session,
+            DividendDate,
+            [{"security_id": sec.id, "ex_date": ex, "pay_date": pay}],
+            ["security_id", "ex_date"],
+        )
+        session.execute(
+            update(DividendEvent)
+            .where(DividendEvent.security_id == sec.id, DividendEvent.ex_date == ex)
+            .values(pay_date=pay)
+        )
+        session.commit()
+        count += 1
+    log.info("calendario de dividendos: %d/%d valores con fecha de pago", count, len(securities))
+    return count
+
+
 # --- Agrupaciones que usa el planificador -----------------------------------------
 
 
@@ -369,6 +422,7 @@ def nightly(session: Session) -> None:
     refresh_profiles(session)  # antes que el histórico: fija la divisa de cotización
     refresh_history(session)
     refresh_quotes(session)
+    refresh_dividend_dates(session)
     recompute_valuations(session)
 
 
