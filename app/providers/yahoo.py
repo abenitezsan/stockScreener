@@ -7,7 +7,7 @@ Sufijos de Yahoo para los mercados de HeyTrade: .MC Madrid, .DE Xetra, .PA Parí
 
 import logging
 import math
-from datetime import UTC
+from datetime import UTC, date
 from pathlib import Path
 
 import pandas as pd
@@ -57,6 +57,7 @@ INFO_METRICS = {
     "target_mean_price": "targetMeanPrice",
 }
 # Métricas expresadas en unidades de precio (se convierten de peniques a libras)
+MAX_PAY_LAG_DAYS = 120  # más entre fecha ex y pago: no es el mismo dividendo
 PRICE_METRICS = ("dividend_rate", "week52_high", "week52_low", "ma200", "target_mean_price")
 
 # Yahoo cotiza Londres en peniques (GBp) y Tel Aviv en agorot (ILA); normalizamos a la divisa ISO.
@@ -232,6 +233,17 @@ class YahooProvider:
             quote_type=info.get("quoteType"),
             metrics=metrics,
         )
+
+    def get_dividend_dates(self, symbol: str) -> tuple[date, date] | None:
+        """Calendario de Yahoo (`calendarEvents`): fecha ex y de pago del próximo dividendo. A
+        veces la de pago es la del dividendo anterior: si no cuadra con la ex, se descarta."""
+        cal = yf.Ticker(symbol).calendar or {}
+        ex, pay = cal.get("Ex-Dividend Date"), cal.get("Dividend Date")
+        if not isinstance(ex, date) or not isinstance(pay, date):
+            return None
+        if not 0 <= (pay - ex).days <= MAX_PAY_LAG_DAYS:
+            return None
+        return ex, pay
 
     def get_financials(self, symbol: str) -> list[FinancialsData]:
         ticker = yf.Ticker(symbol)

@@ -109,3 +109,24 @@ def test_find_symbol_prefers_equity_on_requested_exchange(monkeypatch):
     monkeypatch.setattr(yahoo.yf, "Search", FakeSearch)
     assert YahooProvider().find_symbol("Andritz AG", ".VI") == "ANDR.VI"
     assert YahooProvider().find_symbol("Andritz AG", ".MC") is None
+
+
+def test_get_dividend_dates_from_calendar(monkeypatch):
+    calendars = {
+        "OK": {"Ex-Dividend Date": date(2026, 11, 20), "Dividend Date": date(2026, 12, 10)},
+        # Fecha de pago del dividendo anterior: no es de este pago y se descarta
+        "STALE": {"Ex-Dividend Date": date(2026, 11, 20), "Dividend Date": date(2026, 9, 1)},
+        "NOPAY": {"Ex-Dividend Date": date(2026, 11, 20)},
+        "EMPTY": {},
+    }
+
+    class CalTicker:
+        def __init__(self, symbol):
+            self.calendar = calendars[symbol]
+
+    monkeypatch.setattr(yahoo.yf, "Ticker", CalTicker)
+    provider = YahooProvider()
+    assert provider.get_dividend_dates("OK") == (date(2026, 11, 20), date(2026, 12, 10))
+    assert provider.get_dividend_dates("STALE") is None
+    assert provider.get_dividend_dates("NOPAY") is None
+    assert provider.get_dividend_dates("EMPTY") is None

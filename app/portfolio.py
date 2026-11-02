@@ -11,6 +11,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
+from itertools import pairwise
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
@@ -22,6 +23,7 @@ from app.models import (
     Contribution,
     CostAdjustment,
     DcaPlan,
+    DividendDate,
     DividendEvent,
     DividendPayment,
     PendingDocument,
@@ -675,6 +677,7 @@ def fetch_market_data(symbol: str) -> None:
             jobs.refresh_history(session, symbols=[symbol])
             jobs.refresh_quotes(session, symbols=[symbol])
             jobs.refresh_financials(session, symbols=[symbol])
+            jobs.refresh_dividend_dates(session, symbols=[symbol])
             jobs.recompute_valuations(session, symbols=[symbol])
     except Exception:
         logging.getLogger(__name__).exception("No se pudieron descargar datos de %s", symbol)
@@ -931,12 +934,27 @@ def _last_dividend(session: Session, security_id: int) -> LastDividend | None:
 
 
 def _next_dividend(session: Session, security_id: int, now: date) -> NextDividend | None:
-    """Próxima fecha ex-dividendo: la anunciada si existe; si no, la del calendario del último año
-    (cada pago de los últimos 12 meses, un año después) más cercana a hoy."""
-    upcoming = session.scalar(
-        select(func.min(DividendEvent.ex_date)).where(
-            DividendEvent.security_id == security_id, DividendEvent.ex_date >= now
-        )
+    """Próxima fecha ex-dividendo: la anunciada (histórico o calendario del proveedor) si existe;
+    si no, la del calendario del último año (cada pago de los últimos 12 meses, un año después)
+    más cercana a hoy."""
+    upcoming = min(
+        (
+            d
+            for d in (
+                session.scalar(
+                    select(func.min(DividendEvent.ex_date)).where(
+                        DividendEvent.security_id == security_id, DividendEvent.ex_date >= now
+                    )
+                ),
+                session.scalar(
+                    select(func.min(DividendDate.ex_date)).where(
+                        DividendDate.security_id == security_id, DividendDate.ex_date >= now
+                    )
+                ),
+            )
+            if d
+        ),
+        default=None,
     )
     if upcoming:
         return NextDividend(upcoming, False)
@@ -1087,50 +1105,184 @@ def allocation(rows: list[Position], key) -> list[tuple[str, float]]:
 
 
 @dataclass
+class DividendItem:
+    """Un dividendo de la lista mensual: cobrado (`DividendPayment`) o esperado y pendiente."""
+
+    security: Security
+    ex_date: date | None
+    pay_date: date
+    gross_eur: float
+    net_eur: float | None = None  # solo los cobrados
+    paid: bool = False
+    estimated: bool = False  # calendario del año anterior repetido (no anunciado)
+    pay_estimated: bool = False  # fecha de cobro deducida de la fecha ex (retraso habitual)
+
+
+@dataclass
 class Projection:
-    months: list[tuple[int, int, float]]  # (año, mes, EUR bruto)
+    months: list[tuple[int, int, float]]  # (año, mes de la fecha de cobro, EUR bruto)
     total_eur: float
     estimated: list[str]  # valores repartidos por igual por falta de calendario
+    items: list[DividendItem] = field(default_factory=list)  # cada pago esperado, por fecha
+
+
+DEFAULT_PAY_LAG = 21  # días entre fecha ex y cobro cuando no hay historia propia
+MAX_PAY_LAG = 120
+
+
+def _add_year(day: date) -> date:
+    try:
+        return day.replace(year=day.year + 1)
+    except ValueError:  # 29 de febrero
+        return day + timedelta(days=365)
+
+
+def _month_start(day: date, months: int = 0) -> date:
+    index = day.year * 12 + day.month - 1 + months
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def _pay_lags(session: Session, security_ids: list[int]) -> dict[int, int]:
+    """Retraso típico (mediana, en días) entre fecha ex y cobro de cada valor, según los cobros
+    registrados por cualquier usuario (su fecha ex o, si no la tienen, la fecha ex del proveedor
+    inmediatamente anterior al cobro) y las fechas del calendario del proveedor."""
+    if not security_ids:
+        return {}
+    events: dict[int, list[date]] = defaultdict(list)
+    for sec_id, ex_date in session.execute(
+        select(DividendEvent.security_id, DividendEvent.ex_date).where(
+            DividendEvent.security_id.in_(security_ids)
+        )
+    ):
+        events[sec_id].append(ex_date)
+    lags: dict[int, list[int]] = defaultdict(list)
+    for sec_id, ex_date, pay_date in session.execute(
+        select(
+            DividendPayment.security_id, DividendPayment.ex_date, DividendPayment.pay_date
+        ).where(DividendPayment.security_id.in_(security_ids), DividendPayment.source != "import")
+    ):
+        if ex_date is None:
+            ex_date = max((d for d in events[sec_id] if d <= pay_date), default=None)
+        if ex_date is not None and 0 <= (pay_date - ex_date).days <= MAX_PAY_LAG:
+            lags[sec_id].append((pay_date - ex_date).days)
+    # Fechas ex y de pago del calendario del proveedor
+    for sec_id, pairs in _provider_dates(session, security_ids).items():
+        lags[sec_id].extend((pay - ex).days for ex, pay in pairs.items())
+    return {k: sorted(v)[len(v) // 2] for k, v in lags.items() if v}
+
+
+def _provider_dates(session: Session, security_ids: list[int]) -> dict[int, dict[date, date]]:
+    """Fecha de pago por fecha ex de cada valor, según el calendario del proveedor."""
+    out: dict[int, dict[date, date]] = defaultdict(dict)
+    if security_ids:
+        for sec_id, ex, pay in session.execute(
+            select(DividendDate.security_id, DividendDate.ex_date, DividendDate.pay_date).where(
+                DividendDate.security_id.in_(security_ids)
+            )
+        ):
+            out[sec_id][ex] = pay
+    return out
 
 
 def project_dividends(session: Session, rows: list[Position]) -> Projection:
-    """Dividendos brutos de los próximos 12 meses.
+    """Dividendos brutos esperados en los 12 meses que empiezan en el mes actual, repartidos por
+    mes de la fecha de COBRO (no la fecha ex).
 
-    Para cada valor se repite el calendario de los últimos 12 meses (mes de la fecha ex), con el
-    dividendo actual: acciones × importe de cada pago × (dividendo estimado ÷ dividendo 12 m).
-    Sin calendario, el dividendo anual se reparte por igual en los 12 meses.
+    Para cada valor: los pagos anunciados (o ya ex y aún por cobrar) con su importe, y el resto
+    repitiendo el calendario del último año con el dividendo actual: acciones × importe de cada
+    pago × (dividendo estimado ÷ dividendo 12 m). La fecha de cobro es la del proveedor o, si no
+    la da, la fecha ex más el retraso habitual del valor (ver `_pay_lags`). Si el calendario del
+    proveedor ya anuncia el próximo pago (`DividendDate`), se usan sus fechas. Sin calendario, el
+    dividendo anual se reparte por igual en los 12 meses.
     """
     now = today()
+    start, end = _month_start(now), _month_start(now, 12)
     window = now - timedelta(days=365)
     buckets = [0.0] * 12  # índice = meses desde el actual
     estimated: list[str] = []
-    for p in rows:
-        if not p.is_open or p.fx is None or p.annual_dividend_ps is None:
-            continue
+    items: list[DividendItem] = []
+    open_rows = [
+        p for p in rows if p.is_open and p.fx is not None and p.annual_dividend_ps is not None
+    ]
+    ids = [p.security.id for p in open_rows]
+    lags = _pay_lags(session, ids)
+    provider_dates = _provider_dates(session, ids)
+
+    def add(item: DividendItem) -> None:
+        offset = (item.pay_date.year * 12 + item.pay_date.month) - (now.year * 12 + now.month)
+        if 0 <= offset < 12:
+            buckets[offset] += item.gross_eur
+            items.append(item)
+
+    for p in open_rows:
         val = session.get(Valuation, p.security.id)
+        lag = timedelta(days=lags.get(p.security.id, DEFAULT_PAY_LAG))
+        # Un año y un trimestre atrás: los pagos de hace algo más de un año cuyo cobro, repetido,
+        # cae aún en la ventana
         events = session.execute(
-            select(DividendEvent.ex_date, DividendEvent.amount).where(
-                DividendEvent.security_id == p.security.id, DividendEvent.ex_date > window
+            select(DividendEvent.ex_date, DividendEvent.pay_date, DividendEvent.amount)
+            .where(
+                DividendEvent.security_id == p.security.id,
+                DividendEvent.ex_date > window - timedelta(days=MAX_PAY_LAG),
             )
+            .order_by(DividendEvent.ex_date)
         ).all()
-        ttm = sum(a for _, a in events)
-        if events and ttm > 0:
-            scale = p.annual_dividend_ps / ttm
-            if val and val.dividend_ttm and val.dividend_forward:
-                scale = val.dividend_forward / val.dividend_ttm
-            for ex_date, amount in events:
-                offset = (ex_date.year * 12 + ex_date.month) - (now.year * 12 + now.month)
-                offset %= 12
-                buckets[offset] += float(p.shares) * amount * scale * p.fx
-        else:
+        ttm = sum(a for ex, _, a in events if window < ex <= now)
+        if not events or ttm <= 0:
             estimated.append(p.security.symbol)
             for i in range(12):
                 buckets[i] += (p.annual_dividend_eur or 0.0) / 12
+            continue
+        scale = p.annual_dividend_ps / ttm
+        if val and val.dividend_ttm and val.dividend_forward:
+            scale = val.dividend_forward / val.dividend_ttm
+        shares = float(p.shares)
+        # Separación mínima entre pagos: dos fechas más cercanas que su mitad son el mismo pago
+        gaps = [(b[0] - a[0]).days for a, b in pairwise(events)]
+        tolerance = max(min([45, *[g // 2 for g in gaps if g > 0]]), 5)
+        real_ex = [ex for ex, _, _ in events]
+        known = provider_dates.get(p.security.id, {})
+        # Anunciados por el proveedor (fecha ex y de pago, sin importe) que aún no están en el
+        # histórico: fijan las fechas del pago repetido del año anterior que les corresponde
+        announced = {
+            ex: pay
+            for ex, pay in known.items()
+            if pay >= start and not any(abs((ex - r).days) <= tolerance for r in real_ex)
+        }
+        for ex, pay, amount in events:
+            pay = pay or known.get(ex)
+            pay_est = pay is None
+            pay = pay or ex + lag
+            if ex > now or pay >= start:  # anunciado, o ya ex y por cobrar este mes o después
+                add(
+                    DividendItem(p.security, ex, pay, shares * amount * p.fx, pay_estimated=pay_est)
+                )
+                continue
+            next_ex, next_pay = _add_year(ex), _add_year(pay)
+            if any(abs((next_ex - r).days) <= tolerance for r in real_ex):
+                continue  # ya está en el histórico
+            pay_est = True
+            match = min(announced, key=lambda d: abs((d - next_ex).days), default=None)
+            if match is not None and abs((match - next_ex).days) <= tolerance:
+                next_ex, next_pay, pay_est = match, announced.pop(match), False
+            if next_pay >= end:
+                continue  # fuera de la ventana
+            add(
+                DividendItem(
+                    p.security,
+                    next_ex,
+                    next_pay,
+                    shares * amount * scale * p.fx,
+                    estimated=True,
+                    pay_estimated=pay_est,
+                )
+            )
+    items.sort(key=lambda i: (i.pay_date, i.security.symbol))
     months = []
     for i, amount in enumerate(buckets):
         index = now.year * 12 + now.month - 1 + i
         months.append((index // 12, index % 12 + 1, amount))
-    return Projection(months, sum(buckets), estimated)
+    return Projection(months, sum(buckets), estimated, items)
 
 
 @dataclass
@@ -1141,10 +1293,15 @@ class CalendarMonth:
     received_net: float = 0.0
     pending: float = 0.0  # esperado y aún sin cobrar (mes actual y siguientes), bruto
     future: bool = False  # el mes actual o posterior
+    items: list[DividendItem] = field(default_factory=list)  # cobrados y pendientes, por fecha
 
     @property
     def total(self) -> float:
         return self.received_gross + self.pending
+
+    @property
+    def key(self) -> str:
+        return f"{self.year}-{self.month:02d}"
 
 
 @dataclass
@@ -1159,49 +1316,101 @@ class DividendCalendar:
     avg_months: int  # meses sobre los que se calcula esa media
     window_received_gross: float
     window_expected_gross: float  # cobrado + pendiente en la ventana
+    selected: str = ""  # «AAAA-MM» del mes cuya lista se muestra
 
 
 def _ym(index: int) -> str:
     return f"{index // 12}-{index % 12 + 1:02d}"
 
 
+PAID_MATCH_DAYS = 20  # un cobro cuenta como el pago esperado si su fecha está a menos de esto
+
+
+def _match_paid(expected: list[DividendItem], paid: list[DividendItem]) -> set[int]:
+    """Pagos esperados (por `id`) que ya tienen su cobro registrado: mismo valor y misma fecha
+    ex, o la fecha de cobro más cercana a menos de `PAID_MATCH_DAYS`. Cada cobro solo cubre un
+    pago esperado."""
+    used: set[int] = set()
+    done: set[int] = set()
+    for item in sorted(expected, key=lambda i: i.pay_date):
+        candidates = [p for p in paid if p.security.id == item.security.id and id(p) not in used]
+        same_ex = [
+            p
+            for p in candidates
+            if p.ex_date and item.ex_date and abs((p.ex_date - item.ex_date).days) <= 3
+        ]
+        close = [p for p in candidates if abs((p.pay_date - item.pay_date).days) <= PAID_MATCH_DAYS]
+        match = min(
+            same_ex or close, key=lambda p: abs((p.pay_date - item.pay_date).days), default=None
+        )
+        if match is not None:
+            used.add(id(match))
+            done.add(id(item))
+    return done
+
+
 def dividend_calendar(
-    session: Session, user_id: int, projection: Projection, start: str = ""
+    session: Session, user_id: int, projection: Projection, start: str = "", month: str = ""
 ) -> DividendCalendar:
-    """Dividendos por mes de una ventana de 12 meses: cobrados (por fecha de pago) y esperados.
+    """Dividendos por mes de COBRO de una ventana de 12 meses: cobrados y esperados.
 
     Por defecto la ventana son los próximos 12 meses (desde el actual); `start` («AAAA-MM») la
     mueve a periodos anteriores. Los meses pasados solo llevan lo cobrado; el actual y los
-    siguientes, lo cobrado más lo esperado que falta (proyección, ver `project_dividends`).
+    siguientes, lo cobrado más los pagos esperados que aún no tienen cobro registrado (ver
+    `project_dividends`). `month` («AAAA-MM») elige el mes cuya lista se muestra; por defecto, el
+    actual (o el último de la ventana si es del pasado).
     """
     now = today()
     now_idx = now.year * 12 + now.month - 1
     received: dict[int, list[float]] = defaultdict(lambda: [0.0, 0.0])
-    for pay in session.scalars(
-        select(DividendPayment).where(
+    paid: dict[int, list[DividendItem]] = defaultdict(list)
+    for pay, sec in session.execute(
+        select(DividendPayment, Security)
+        .join(Security, Security.id == DividendPayment.security_id)
+        .where(
             DividendPayment.user_id == user_id,
             DividendPayment.source != "import",  # sin fecha real de cobro: no entran por mes
         )
     ):
-        bucket = received[pay.pay_date.year * 12 + pay.pay_date.month - 1]
-        bucket[0] += float(pay.gross * pay.fx_rate)
-        bucket[1] += float(pay.net_base)
+        idx = pay.pay_date.year * 12 + pay.pay_date.month - 1
+        gross, net = float(pay.gross * pay.fx_rate), float(pay.net_base)
+        received[idx][0] += gross
+        received[idx][1] += net
+        paid[idx].append(DividendItem(sec, pay.ex_date, pay.pay_date, gross, net, paid=True))
     first_idx = min(received, default=now_idx)
     try:
-        year, month = (int(x) for x in start.split("-"))
-        start_idx = year * 12 + month - 1
+        year, mon = (int(x) for x in start.split("-"))
+        start_idx = year * 12 + mon - 1
     except ValueError:
         start_idx = now_idx
     start_idx = max(min(start_idx, now_idx), first_idx - 11)
-    expected = {now_idx + i: amount for i, (_, _, amount) in enumerate(projection.months)}
+    expected: dict[int, list[DividendItem]] = defaultdict(list)
+    for item in projection.items:
+        expected[item.pay_date.year * 12 + item.pay_date.month - 1].append(item)
+    # Valores sin calendario: su parte repartida por igual queda como pendiente sin lista
+    flat = {now_idx + i: amount for i, (_, _, amount) in enumerate(projection.months)}
+    for idx, its in expected.items():
+        flat[idx] = flat.get(idx, 0.0) - sum(i.gross_eur for i in its)
+    # Un cobro del mes anterior (o adelantado) también puede ser uno de los pagos esperados
+    recent = [i for idx, its in paid.items() if idx >= now_idx - 1 for i in its]
+    collected = _match_paid(projection.items, recent)
     months = []
     for idx in range(start_idx, start_idx + 12):
         gross, net = received.get(idx, (0.0, 0.0))
         future = idx >= now_idx
-        pending = max(expected.get(idx, 0.0) - gross, 0.0) if future else 0.0
-        months.append(CalendarMonth(idx // 12, idx % 12 + 1, gross, net, pending, future))
+        got = paid.get(idx, [])
+        pending_items = (
+            [i for i in expected.get(idx, []) if id(i) not in collected] if future else []
+        )
+        pending = sum(i.gross_eur for i in pending_items)
+        if future:
+            pending += max(flat.get(idx, 0.0), 0.0)
+        items = sorted([*got, *pending_items], key=lambda i: (i.pay_date, i.security.symbol))
+        months.append(CalendarMonth(idx // 12, idx % 12 + 1, gross, net, pending, future, items))
     n = min(12, max(now_idx - first_idx, 0))  # meses completos con historia, máximo 12
     done = [received.get(i, (0.0, 0.0)) for i in range(now_idx - n, now_idx)]
+    keys = [m.key for m in months]
+    selected = month if month in keys else (_ym(now_idx) if _ym(now_idx) in keys else keys[-1])
     return DividendCalendar(
         months=months,
         start=_ym(start_idx),
@@ -1213,6 +1422,7 @@ def dividend_calendar(
         avg_months=n,
         window_received_gross=sum(m.received_gross for m in months),
         window_expected_gross=sum(m.total for m in months),
+        selected=selected,
     )
 
 

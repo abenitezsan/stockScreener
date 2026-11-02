@@ -69,6 +69,10 @@ class MarketDataProvider(Protocol):
 
     def get_fx_rates(self, currencies: list[str], base: str) -> dict[str, float]: ...
 
+    def get_dividend_dates(self, symbol: str) -> tuple[date, date] | None:
+        """Fechas ex y de pago del próximo (o último anunciado) dividendo; None si no se conocen."""
+        ...
+
     def find_symbol(self, name: str, suffix: str) -> str | None:
         """Ticker de una empresa por su nombre, en la bolsa del sufijo (.VI, .IR…)."""
         ...

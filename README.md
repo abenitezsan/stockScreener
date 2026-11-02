@@ -243,14 +243,14 @@ Se ejecutan dentro del proceso web; por eso se usa **un solo worker**. Horario d
 | Tarea | Cuándo | Qué hace |
 |---|---|---|
 | Cotizaciones | Lunes a viernes, cada 20 min de 9 a 22 h | Último precio de todos los valores (descarga en bloque) |
-| Nocturna | Lunes a viernes, 23:15 | Tipos de cambio, fichas y fundamentales, histórico y dividendos recientes, recálculo de la valoración |
+| Nocturna | Lunes a viernes, 23:15 | Tipos de cambio, fichas y fundamentales, histórico y dividendos recientes, fecha de pago del próximo dividendo de los valores en cartera (calendario de Yahoo), recálculo de la valoración |
 | Semanal | Sábado, 10:00 | Cuentas anuales y recálculo de la valoración |
 
 La yield actual, el PER, la rentabilidad total estimada y el semáforo se calculan en cada consulta
 con la última cotización, así que siguen al precio durante el día.
 
 Cualquier tarea se puede lanzar a mano:
-`python -m app.cli refresh quotes|fx|profiles|history|financials|valuations`.
+`python -m app.cli refresh quotes|fx|profiles|history|financials|dividend-dates|valuations`.
 
 ### Seguridad
 

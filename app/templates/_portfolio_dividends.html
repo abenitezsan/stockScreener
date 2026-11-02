@@ -15,19 +15,46 @@
   {% if not calendar.is_current %}<a href="{{ ROOT }}/portfolio?tab=dividendos">Hoy</a>{% endif %}
   {% if calendar.next_start %}<a role="button" class="secondary outline" href="{{ ROOT }}/portfolio?tab=dividendos&start={{ calendar.next_start }}">12 meses después →</a>{% else %}<span class="muted">próximos 12 meses</span>{% endif %}
 </nav>
-<svg viewBox="0 0 600 200" class="evolution div-chart" role="img" aria-label="Dividendos brutos por mes: cobrados y esperados">
+<svg viewBox="0 0 600 200" class="evolution div-chart" role="img" aria-label="Dividendos brutos por mes de cobro: cobrados y esperados. Pulsa un mes para ver su lista">
   <line x1="0" y1="170" x2="600" y2="170" stroke="var(--grid, #ccc)" />
   {% for c in div_chart %}{% set m = c.m %}
-  <g><title>{{ mnames[m.month - 1] }} {{ m.year }}: cobrado {{ m.received_gross | fmt('eur') }}{% if m.pending %}, pendiente {{ m.pending | fmt('eur') }}{% endif %}</title>
+  <a href="{{ ROOT }}/portfolio?tab=dividendos&start={{ calendar.start }}&mes={{ m.key }}#div-mes" data-div-month="{{ m.key }}" class="div-bar{% if m.key == calendar.selected %} selected{% endif %}" aria-label="Ver dividendos de {{ mnames[m.month - 1] }} {{ m.year }}">
+    <title>{{ mnames[m.month - 1] }} {{ m.year }}: cobrado {{ m.received_gross | fmt('eur') }}{% if m.pending %}, pendiente {{ m.pending | fmt('eur') }}{% endif %}</title>
+    <rect class="div-hit" x="{{ c.x - 4 }}" y="0" width="49" height="196" rx="4"/>
     {% if c.got_h %}<rect x="{{ c.x }}" y="{{ c.got_y | round(1) }}" width="41" height="{{ c.got_h | round(1) }}" rx="2" fill="var(--series-1)"/>{% endif %}
     {% if c.pend_h %}<rect x="{{ c.x }}" y="{{ c.pend_y | round(1) }}" width="41" height="{{ c.pend_h | round(1) }}" rx="2" fill="var(--series-1)" fill-opacity="0.35" stroke="var(--series-1)" stroke-dasharray="3 2"/>{% endif %}
     {% if m.total %}<text x="{{ c.x + 20.5 }}" y="{{ c.label_y | round(1) }}" text-anchor="middle" font-size="10" fill="currentColor">{{ m.total | round | int }}</text>{% endif %}
     <text x="{{ c.x + 20.5 }}" y="186" text-anchor="middle" font-size="10" fill="currentColor">{{ mnames[m.month - 1] }}{% if m.month == 1 or loop.first %} {{ m.year }}{% endif %}</text>
-  </g>{% endfor %}
+  </a>{% endfor %}
 </svg>
-<p class="muted"><small><span style="color: var(--series-1)">■</span> Cobrado (por fecha de pago, bruto en €) · <span style="color: var(--series-1)">▢</span> Esperado y pendiente. En este periodo: cobrado {{ calendar.window_received_gross | fmt('eur') }}{% if calendar.window_expected_gross > calendar.window_received_gross %}, esperado en total {{ calendar.window_expected_gross | fmt('eur') }}{% endif %} · media {{ (calendar.window_expected_gross / 12) | fmt('eur') }}/mes.
-Lo esperado repite el calendario de pagos de los últimos 12 meses (mes de la fecha ex-dividendo, así que el cobro llega algo después) con el dividendo estimado actual y tus acciones de hoy, a cambio actual.
-{% if projection.estimated %} Sin calendario conocido, repartido por igual: {{ projection.estimated | join(', ') }}.{% endif %}</small></p>
+<p class="muted"><small><span style="color: var(--series-1)">■</span> Cobrado · <span style="color: var(--series-1)">▢</span> Esperado y pendiente. Todo por <strong>mes de la fecha de cobro</strong>, bruto en €. Pulsa un mes para ver su lista. En este periodo: cobrado {{ calendar.window_received_gross | fmt('eur') }}{% if calendar.window_expected_gross > calendar.window_received_gross %}, esperado en total {{ calendar.window_expected_gross | fmt('eur') }}{% endif %} · media {{ (calendar.window_expected_gross / 12) | fmt('eur') }}/mes.
+Lo esperado son los pagos ya anunciados y, para el resto, el calendario de los últimos 12 meses repetido con el dividendo estimado actual y tus acciones de hoy, a cambio actual. Si el proveedor no da la fecha de cobro, se estima con la fecha ex más el retraso habitual del valor (≈).
+{% if projection.estimated %} Sin calendario conocido, repartido por igual (no aparecen en la lista): {{ projection.estimated | join(', ') }}.{% endif %}</small></p>
+
+<div id="div-mes">
+{% set month_names = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'] %}
+{% for m in calendar.months %}
+<section class="div-month" data-div-list="{{ m.key }}"{% if m.key != calendar.selected %} hidden{% endif %}>
+  <h4>Dividendos de {{ month_names[m.month - 1] }} {{ m.year }}</h4>
+  <p class="muted"><small>Cobrado {{ m.received_gross | fmt('eur') }}{% if m.received_gross %} (neto {{ m.received_net | fmt('eur') }}){% endif %}{% if m.future %} · pendiente {{ m.pending | fmt('eur') }}{% endif %}</small></p>
+  {% if m.items %}
+  <div class="scroll-x"><table class="striped div-list">
+    <thead><tr><th>Valor</th><th>Fecha ex</th><th>Fecha cobro</th><th class="num">Bruto</th></tr></thead>
+    <tbody>
+    {% for i in m.items %}
+      <tr>
+        <td><a href="{{ ROOT }}/security/{{ i.security.symbol }}">{{ i.security.symbol }}</a><br>{% if i.paid %}<span class="tag paid">Cobrado</span>{% else %}<span class="tag pending">Pendiente</span>{% endif %}</td>
+        <td>{% if i.ex_date %}{{ i.ex_date.strftime('%d/%m/%Y') }}{% else %}–{% endif %}</td>
+        <td>{% if i.pay_estimated %}<span title="Fecha estimada: fecha ex + retraso habitual">≈ </span>{% endif %}{{ i.pay_date.strftime('%d/%m/%Y') }}</td>
+        <td class="num">{% if i.estimated %}<span title="Importe estimado con el calendario del año anterior">≈ </span>{% endif %}{{ i.gross_eur | fmt('eur') }}{% if i.paid and i.net_eur is not none %}<br><small class="muted">neto {{ i.net_eur | fmt('eur') }}</small>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="muted">No hay dividendos cobrados ni esperados este mes.</p>{% endif %}
+</section>
+{% endfor %}
+</div>
 
 <h4>Cobrado por año</h4>
 {% if received %}

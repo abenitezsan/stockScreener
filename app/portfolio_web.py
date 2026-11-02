@@ -200,6 +200,7 @@ def _page(
     notice: str = "",
     status: int = 200,
     start: str = "",
+    month: str = "",
     sort: str = "",
     direction: str = "",
 ):
@@ -255,7 +256,7 @@ def _page(
         ctx["received"] = portfolio.tax_summary(session, user.id)
         ctx["imported_dividends"] = portfolio.imported_dividends_eur(session, user.id)
         ctx["calendar"] = cal = portfolio.dividend_calendar(
-            session, user.id, ctx["projection"], start
+            session, user.id, ctx["projection"], start, month
         )
         ctx["div_chart"] = _div_chart(cal)
     if tab == "fiscal":
@@ -295,6 +296,7 @@ def portfolio_page(
     tab: str = "posiciones",
     done: str = "",
     start: str = "",
+    mes: str = "",
     sort: str = "",
     dir: str = "",
 ):
@@ -307,7 +309,17 @@ def portfolio_page(
         "deleted": "Eliminado.",
         "isin": "ISIN asignado.",
     }.get(done, "")
-    return _page(request, session, user, tab, notice=notice, start=start, sort=sort, direction=dir)
+    return _page(
+        request,
+        session,
+        user,
+        tab,
+        notice=notice,
+        start=start,
+        month=mes,
+        sort=sort,
+        direction=dir,
+    )
 
 
 @router.post("/portfolio/upload", response_class=HTMLResponse)

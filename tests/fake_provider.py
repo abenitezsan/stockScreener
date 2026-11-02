@@ -6,6 +6,7 @@ from app.config import today
 from app.providers.base import FinancialsData, HistoryData, ProfileData, QuoteData
 
 TODAY = today()
+PAY_LAG = 25  # días entre fecha ex y pago en el calendario sintético
 
 # símbolo: (divisa Yahoo, sector, industria, precio, dividendo anual inicial, crecimiento, pagos/año)
 SPECS = {
@@ -103,6 +104,18 @@ class FakeProvider:
             )
             for y in range(TODAY.year - 4, TODAY.year)
         ]
+
+    def get_dividend_dates(self, symbol):
+        """Próximo dividendo del calendario sintético (día 15), cobrado 25 días después."""
+        if symbol not in SPECS or not SPECS[symbol][-1]:
+            return None
+        per_year = SPECS[symbol][-1]
+        for year in (TODAY.year, TODAY.year + 1):
+            for k in range(per_year):
+                ex = date(year, 1 + k * (12 // per_year), 15)
+                if ex > TODAY:
+                    return ex, ex + timedelta(days=PAY_LAG)
+        return None
 
     def get_fx_rates(self, currencies, base):
         rates = {
