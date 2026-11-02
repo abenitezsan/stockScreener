@@ -433,3 +433,95 @@ class CostAdjustment(Base):
     avg_eur: Mapped[Decimal] = mapped_column(Money)  # precio medio fijado, EUR por acción
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+# --- Conector de Claude (servidor MCP) ---------------------------------------------
+# Claude (claude.ai, app de escritorio y móvil, Claude Code) se conecta a /mcp con OAuth 2.1
+# (registro dinámico de cliente + PKCE) o con una clave personal fija. Solo se guardan hashes.
+
+
+class OAuthClient(Base):
+    """Cliente OAuth: el que Claude registra solo (registro dinámico) o uno creado con la CLI."""
+
+    __tablename__ = "oauth_clients"
+
+    client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    # None = cliente público (PKCE sin secreto), como el que registra claude.ai
+    secret_hash: Mapped[str | None] = mapped_column(String(64))
+    name: Mapped[str] = mapped_column(String(200))
+    redirect_uris: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OAuthCode(Base):
+    """Código de autorización de un solo uso (10 minutos)."""
+
+    __tablename__ = "oauth_codes"
+
+    code_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    client_id: Mapped[str] = mapped_column(
+        ForeignKey("oauth_clients.client_id", ondelete="CASCADE")
+    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    redirect_uri: Mapped[str] = mapped_column(Text)
+    code_challenge: Mapped[str] = mapped_column(String(128))
+    resource: Mapped[str | None] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class McpToken(Base):
+    """Token de acceso al servidor MCP: access y refresh de OAuth, o clave personal (`key`)."""
+
+    __tablename__ = "mcp_tokens"
+    __table_args__ = (
+        CheckConstraint("kind IN ('access', 'refresh', 'key')", name="kind"),
+        Index(None, "user_id", "kind"),
+    )
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8))
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    client_id: Mapped[str | None] = mapped_column(
+        ForeignKey("oauth_clients.client_id", ondelete="CASCADE"), index=True
+    )
+    name: Mapped[str | None] = mapped_column(String(100))  # claves personales
+    prefix: Mapped[str | None] = mapped_column(String(16))  # inicio de la clave, para reconocerla
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Refresh ya cambiado por otro: se admite unos segundos más (peticiones simultáneas)
+    rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class McpCall(Base):
+    """Historial: cada herramienta que Claude ha usado, con sus argumentos."""
+
+    __tablename__ = "mcp_calls"
+    __table_args__ = (Index(None, "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    client: Mapped[str | None] = mapped_column(String(200))
+    tool: Mapped[str] = mapped_column(String(64))
+    arguments: Mapped[dict] = mapped_column(JSON, default=dict)
+    ok: Mapped[bool] = mapped_column()
+    error: Mapped[str | None] = mapped_column(Text)
+    result_chars: Mapped[int] = mapped_column(default=0)
+    duration_ms: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiNote(Base):
+    """Análisis o conclusión que Claude guarda (herramienta `guardar_analisis`)."""
+
+    __tablename__ = "ai_notes"
+    __table_args__ = (Index(None, "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    security_id: Mapped[int | None] = mapped_column(
+        ForeignKey("securities.id", ondelete="SET NULL"), index=True
+    )
+    title: Mapped[str] = mapped_column(String(200))
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

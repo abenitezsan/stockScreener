@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Autorizar acceso · Stock Screener{% endblock %}
+{% block content %}
+<article class="auth">
+  {% if error %}
+  <h2>No se puede autorizar</h2>
+  <p class="error" role="alert">{{ error }}</p>
+  {% else %}
+  <h2>Conectar con Claude</h2>
+  <p><strong>{{ client.name }}</strong> quiere acceder a los datos de tu cuenta <strong>{{ user.email }}</strong>:</p>
+  <ul>
+    <li>Consultar el screener, las fichas de los valores y tu lista de seguimiento.</li>
+    <li>Consultar tu cartera, dividendos, resumen fiscal y operaciones.</li>
+    <li>Guardar análisis en la app.</li>
+  </ul>
+  <p class="muted"><small>No podrá cambiar tus operaciones ni tu cuenta. Volverás a <code>{{ redirect_host }}</code>. Puedes retirar el acceso cuando quieras en <a href="{{ ROOT }}/claude">Claude</a>.</small></p>
+  <form method="post" action="{{ ROOT }}/oauth/authorize">
+    {% for key, value in params.items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">
+    {% endfor %}
+    <div class="grid">
+      <button type="submit" name="decision" value="deny" class="outline secondary">Cancelar</button>
+      <button type="submit" name="decision" value="allow">Permitir</button>
+    </div>
+  </form>
+  {% endif %}
+</article>
+{% endblock %}

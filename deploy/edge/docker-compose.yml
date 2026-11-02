@@ -1,10 +1,11 @@
-# Proxy de entrada del VPS: el único contenedor que publica el puerto 80.
+# Proxy de entrada del VPS: el único contenedor que publica los puertos 80 y 443.
 # Reparte por ruta entre las apps, cada una en su propio proyecto de Docker Compose:
 #   /tabbito/        -> tabbito (red de tabbito)
 #   /stockscreener/  -> stockscreener (red stockscreener-net)
 #
 # Arranca después de las apps (sus redes tienen que existir):
 #   docker compose up -d
+# HTTPS (lo necesita el conector de Claude): ./enable-https.sh (ver deploy/README.md)
 name: edge
 
 services:
@@ -13,15 +14,32 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
     volumes:
-      # Directorio completo (no ficheros sueltos): los cambios se ven con un simple reload
+      # Directorios completos (no ficheros sueltos): los cambios se ven con un simple reload
       - ./conf.d:/etc/nginx/conf.d:ro
+      - ./snippets:/etc/nginx/snippets:ro
       - ./logs:/var/log/nginx
+      - ./letsencrypt:/etc/letsencrypt:ro
+      - ./certbot-www:/var/www/certbot:ro
+    # Recarga cada 12 h para tomar los certificados renovados
+    command: /bin/sh -c 'while :; do sleep 12h; nginx -s reload; done & exec nginx -g "daemon off;"'
     networks:
       - tabbito
       - stockscreener
     cpus: "0.25"
     mem_limit: "128m"
+
+  # Renueva los certificados de Let's Encrypt (si los hay) dos veces al día
+  certbot:
+    image: certbot/certbot:v2.11.0
+    restart: unless-stopped
+    entrypoint: /bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done'
+    volumes:
+      - ./letsencrypt:/etc/letsencrypt
+      - ./certbot-www:/var/www/certbot
+    cpus: "0.1"
+    mem_limit: "64m"
 
 networks:
   # Redes creadas por los proyectos de cada app; aquí solo se referencian

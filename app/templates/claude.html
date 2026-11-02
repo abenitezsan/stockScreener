@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Claude · Stock Screener{% endblock %}
+{% block content %}
+<h2>Claude</h2>
+{% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+{% if not enabled %}<p class="error" role="alert">El conector está desactivado en el servidor (<code>MCP_ENABLED=false</code>).</p>
+{% elif not allowed %}<p class="error" role="alert">Tu cuenta no está en la lista de usuarios que pueden conectar Claude (<code>MCP_USERS</code>).</p>{% endif %}
+
+<p>Conecta tu cuenta de Claude (web, escritorio y móvil) y pregúntale por lo que ves aquí: tu cartera,
+una posición, el seguimiento o cualquier valor del screener. Claude consulta los datos al momento con
+herramientas de solo lectura y puede guardar sus análisis en la app.</p>
+
+<article>
+  <h4>Añadir el conector en Claude</h4>
+  <label>URL del conector
+    <input type="text" readonly value="{{ mcp_url }}" onclick="this.select()" class="mcp-url">
+  </label>
+  {% if not is_https %}<p class="error">Esta dirección no es HTTPS: Claude necesita HTTPS para conectarse. Activa el certificado del proxy (ver <code>deploy/README.md</code>, «HTTPS para Claude») y entra por la dirección https.</p>{% endif %}
+  <ol>
+    <li>En <a href="https://claude.ai/settings/connectors" target="_blank" rel="noopener">claude.ai → Configuración → Conectores</a>, pulsa <strong>Añadir conector personalizado</strong>.</li>
+    <li>Nombre: <strong>Stock Screener</strong>. URL: la de arriba. Sin más opciones (Claude se registra solo).</li>
+    <li>Pulsa <strong>Conectar</strong>: se abre esta app; entra con tu cuenta y pulsa <strong>Permitir</strong>.</li>
+    <li>Listo: el conector queda guardado en tu cuenta de Claude y aparece también en la app de escritorio y del móvil. Claude renueva el acceso solo; no hay que repetirlo.</li>
+  </ol>
+  <p class="muted"><small>En cada conversación, actívalo desde el menú de herramientas si no lo está. Ejemplos: «¿Cómo va mi cartera hoy y qué posiciones pesan más?», «Analiza ENB.TO con los datos de mi screener y guarda el análisis», «Busca utilities europeas con yield &gt; 5 % y dividendo sostenible».</small></p>
+</article>
+
+<article>
+  <h4>Apps conectadas</h4>
+  {% if apps %}
+  <table>
+    <thead><tr><th>App</th><th>Desde</th><th>Último uso</th><th></th></tr></thead>
+    <tbody>
+    {% for client_id, name, since, last in apps %}
+      <tr>
+        <td>{{ name }}</td>
+        <td>{{ since.strftime('%d/%m/%Y') if since else '–' }}</td>
+        <td>{{ last.strftime('%d/%m/%Y %H:%M') if last else '–' }}</td>
+        <td><form method="post" action="{{ ROOT }}/claude/apps/{{ client_id }}/revoke"><button type="submit" class="outline secondary">Desconectar</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">Ninguna todavía.</p>{% endif %}
+</article>
+
+<article>
+  <h4>Claves personales</h4>
+  <p class="muted">Alternativa a OAuth para clientes que admiten una cabecera fija, como Claude Code:</p>
+  <pre><code>claude mcp add --transport http stockscreener {{ mcp_url }} --header "Authorization: Bearer TU_CLAVE"</code></pre>
+  {% if new_key %}
+  <p class="notice" role="status">Copia tu clave ahora; no se volverá a mostrar:</p>
+  <input type="text" readonly value="{{ new_key }}" onclick="this.select()" class="mcp-url">
+  {% endif %}
+  {% if keys %}
+  <table>
+    <thead><tr><th>Nombre</th><th>Empieza por</th><th>Creada</th><th>Último uso</th><th></th></tr></thead>
+    <tbody>
+    {% for k in keys %}
+      <tr>
+        <td>{{ k.name }}</td><td><code>{{ k.prefix }}…</code></td>
+        <td>{{ k.created_at.strftime('%d/%m/%Y') }}</td>
+        <td>{{ k.last_used_at.strftime('%d/%m/%Y %H:%M') if k.last_used_at else '–' }}</td>
+        <td><form method="post" action="{{ ROOT }}/claude/keys/{{ k.prefix }}/delete"><button type="submit" class="outline secondary">Borrar</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <form method="post" action="{{ ROOT }}/claude/keys" class="grid">
+    <input type="text" name="name" placeholder="Nombre (p. ej. Claude Code portátil)" maxlength="100" aria-label="Nombre de la clave">
+    <button type="submit">Crear clave</button>
+  </form>
+</article>
+
+<article>
+  <h4>Análisis guardados <span class="muted count">{{ notes | length }}</span></h4>
+  {% for n, symbol in notes %}
+  <details>
+    <summary>{{ n.created_at.strftime('%d/%m/%Y %H:%M') }} · {% if symbol %}<a href="{{ ROOT }}/security/{{ symbol }}">{{ symbol }}</a> · {% endif %}{{ n.title }}</summary>
+    <div class="ai-note">{{ n.content }}</div>
+    <form method="post" action="{{ ROOT }}/claude/notes/{{ n.id }}/delete"><button type="submit" class="outline secondary">Borrar</button></form>
+  </details>
+  {% else %}<p class="muted">Pide a Claude «guarda este análisis» y aparecerá aquí (y en la ficha del valor).</p>{% endfor %}
+</article>
+
+<article>
+  <h4>Historial de consultas <span class="muted count">{{ total_calls }}</span></h4>
+  {% if calls %}
+  <div class="table-scroll">
+  <table>
+    <thead><tr><th>Fecha</th><th>App</th><th>Herramienta</th><th>Argumentos</th><th class="num">ms</th><th></th></tr></thead>
+    <tbody>
+    {% for c in calls %}
+      <tr>
+        <td>{{ c.created_at.strftime('%d/%m/%Y %H:%M:%S') }}</td>
+        <td>{{ c.client or '–' }}</td>
+        <td><code>{{ c.tool }}</code></td>
+        <td><small>{{ c.arguments | tojson if c.arguments else '' }}</small></td>
+        <td class="num">{{ c.duration_ms }}</td>
+        <td>{% if c.ok %}✓{% else %}<span title="{{ c.error }}">✗ {{ c.error }}</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% if total_calls > calls | length %}<p class="muted"><small>Se muestran las {{ calls | length }} más recientes.</small></p>{% endif %}
+  {% else %}<p class="muted">Aún no hay consultas.</p>{% endif %}
+</article>
+{% endblock %}

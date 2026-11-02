@@ -18,6 +18,7 @@ from app.analysis.dividends import TtmIndex, analyze
 from app.config import get_settings, today, utcnow
 from app.db import get_session
 from app.models import (
+    AiNote,
     DividendEvent,
     FinancialsAnnual,
     PriceHistory,
@@ -499,6 +500,13 @@ def render_security(
             "chart_data": _chart_data(row, closes, dividends),
             "hard_reasons": hard_flag_reasons(session, sec, row),
             "position": portfolio.position_for(session, user.id, sec.id) if user else None,
+            "ai_notes": session.scalars(
+                select(AiNote)
+                .where(AiNote.user_id == user.id, AiNote.security_id == sec.id)
+                .order_by(AiNote.created_at.desc())
+            ).all()
+            if user
+            else [],
             "today": today(),
             "notice": notice,
             "errors": errors or [],
@@ -623,6 +631,8 @@ REASONS = {
     "watch": "Necesitas estar registrado para añadir empresas a seguimiento.",
     "portfolio": "La cartera es privada: entra para verla.",
     "admin": "Entra con la cuenta de superadministrador.",
+    "claude": "Entra para conectar Claude con tus datos.",
+    "oauth": "Claude quiere acceder a tus datos: entra con tu cuenta de la app para autorizarlo.",
 }
 
 

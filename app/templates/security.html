@@ -149,6 +149,19 @@
   <table><tbody>{% for year, amount in chart_data.annual | reverse %}<tr><td>{{ year }}</td><td class="num">{{ amount | fmt }}</td></tr>{% endfor %}</tbody></table>
 </details>
 
+{% if ai_notes %}
+<section>
+  <h4>Análisis de Claude</h4>
+  {% for n in ai_notes %}
+  <details>
+    <summary>{{ n.created_at.strftime('%d/%m/%Y') }} · {{ n.title }}</summary>
+    <div class="ai-note">{{ n.content }}</div>
+  </details>
+  {% endfor %}
+  <p class="muted"><small>Guardados desde Claude. Se borran en <a href="{{ ROOT }}/claude">Claude</a>.</small></p>
+</section>
+{% endif %}
+
 <section>
   <h4>Seguimiento</h4>
   {% if not user %}

@@ -48,6 +48,15 @@ class Settings(BaseSettings):
     imap_authserv: str = "gmx.net"
     imap_interval_minutes: int = 15
 
+    # Conector de Claude (servidor MCP en /mcp, ver README, «Claude»)
+    mcp_enabled: bool = True
+    # URL pública de la app con su subruta, p. ej. https://152-228-237-219.sslip.io/stockscreener.
+    # Vacía: se deduce de cada petición (esquema y host que reenvía nginx + ROOT_PATH).
+    public_url: str = ""
+    # Emails que pueden conectar Claude, separados por comas. Vacío: cualquier usuario (cada uno
+    # solo ve su propia cartera).
+    mcp_users: str = ""
+
     # Descarga de datos
     # Caché de yfinance (cookies de sesión con Yahoo y zonas horarias). Sin ella, yfinance se
     # vuelve a autenticar en cada petición. En Docker: /data/.cache (persiste entre reinicios).

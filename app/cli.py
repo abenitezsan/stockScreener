@@ -9,7 +9,7 @@ import time
 
 from sqlalchemy import func, select
 
-from app import auth, jobs, mailbox, universe
+from app import auth, jobs, mailbox, oauth, universe
 from app.db import SessionLocal, engine
 from app.logging_setup import setup_logging
 from app.models import (
@@ -88,6 +88,26 @@ def main() -> None:
     )
     p.add_argument("email")
 
+    p = sub.add_parser(
+        "mcp-key",
+        help="Crea una clave personal para el conector de Claude (cabecera Authorization: "
+        "Bearer) de una cuenta; se muestra una sola vez",
+    )
+    p.add_argument("email")
+    p.add_argument("--name", default="CLI", help="Nombre para reconocerla en la página Claude")
+
+    p = sub.add_parser(
+        "mcp-client",
+        help="Crea un cliente OAuth fijo (client_id + secreto) para la opción «Usar tu propio "
+        "cliente OAuth» de Claude; normalmente no hace falta (Claude se registra solo)",
+    )
+    p.add_argument("--name", default="Claude")
+    p.add_argument(
+        "--redirect-uri",
+        action="append",
+        help="Dirección de vuelta (por defecto la de claude.ai); se puede repetir",
+    )
+
     p = sub.add_parser("backup", help="Copia consistente de la base de datos (aunque esté en uso)")
     p.add_argument("path", help="Fichero de destino, p. ej. /data/backup-2026-09-27.db")
 
@@ -109,6 +129,20 @@ def main() -> None:
                 print(set_user_password(session, args.email, _ask_password()))
             except ValueError as error:
                 sys.exit(str(error))
+        elif args.command == "mcp-key":
+            user = session.scalar(
+                select(User).where(User.email == auth.normalize_email(args.email))
+            )
+            if user is None:
+                sys.exit(f"No existe la cuenta {args.email}")
+            print(oauth.create_key(session, user.id, args.name))
+            print("Guárdala ahora: no se puede volver a mostrar (se borra en la página Claude).")
+        elif args.command == "mcp-client":
+            uris = args.redirect_uri or [oauth.CLAUDE_CALLBACK]
+            client, secret = oauth.create_client(session, args.name, uris, confidential=True)
+            print(f"client_id:     {client.client_id}")
+            print(f"client_secret: {secret}")
+            print(f"redirect_uris: {', '.join(uris)}")
         elif args.command == "mailbox-check":
             print(mailbox.run_poll(session))
             for line in mailbox.STATUS.log:

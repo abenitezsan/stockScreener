@@ -389,3 +389,8 @@ svg.div-chart .div-bar.selected text { font-weight: 700; }
 @media (max-width: 576px) { .div-list td, .div-list th { padding-inline: 0.3rem; font-size: 0.85rem; } }
 .tag.paid { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
 .tag.pending { background: var(--hi-bg); }
+
+/* Página Claude */
+.mcp-url { font-family: monospace; font-size: 0.85rem; }
+.ai-note { white-space: pre-wrap; font-size: 0.9rem; margin-block: 0.5rem; }
+.table-scroll { overflow-x: auto; }

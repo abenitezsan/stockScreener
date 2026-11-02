@@ -9,10 +9,13 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
 
 from app import auth
+from app.claude_web import router as claude_router
 from app.config import get_settings
 from app.db import SessionLocal
 from app.logging_setup import setup_logging
+from app.mcp_server import router as mcp_router
 from app.models import User
+from app.oauth import router as oauth_router
 from app.portfolio_web import router as portfolio_router
 from app.web import ROOT, LoginRequired, router
 
@@ -57,6 +60,9 @@ app = FastAPI(title="Stock Screener", docs_url=None, redoc_url=None, lifespan=li
 app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
 app.include_router(router)
 app.include_router(portfolio_router)
+app.include_router(oauth_router)
+app.include_router(mcp_router)
+app.include_router(claude_router)
 
 
 @app.exception_handler(LoginRequired)

@@ -15,6 +15,8 @@ universo comprable en HeyTrade).
    rentabilidad objetivo y notas.
 3. **Cartera (privada):** posiciones valoradas en EUR, dividendos cobrados y proyectados, y resumen
    fiscal. Ver [Cartera](#cartera).
+4. **Claude:** conector MCP para preguntar a Claude (web, escritorio y móvil) por todo lo anterior.
+   Ver [Claude](#claude-conector-mcp).
 
 ## Cartera
 
@@ -78,6 +80,51 @@ a mano. Se activa solo si defines `IMAP_HOST`, `IMAP_USER`, `IMAP_PASSWORD` y
 Prueba manual en el VPS: `docker compose exec stockscreener python -m app.cli mailbox-check`.
 El panel *Cartera → Añadir e importar → Buzón* muestra la última revisión (en memoria: se reinicia
 con la app) y las incidencias; el detalle está en `app.log`.
+
+## Claude (conector MCP)
+
+La app es también un **servidor MCP** (`/stockscreener/mcp`): conectas tu cuenta de Claude una
+vez y, desde claude.ai, la app de escritorio o la del móvil, le preguntas por tu cartera, una
+posición, el seguimiento o cualquier valor del screener. Claude consulta los datos al momento
+con estas herramientas (todas de solo lectura salvo la de guardar):
+
+| Herramienta | Qué devuelve |
+|---|---|
+| `buscar_valor` | Valores por ticker, nombre o ISIN, con sus métricas clave |
+| `screener` | El screener con sus filtros (sector, región, yield, payout, crecimiento, años sin recorte, capitalización, semáforo…) |
+| `ficha_valor` | Todo lo de la ficha: dividendo e historial, valoración por método, alertas, fundamentales, cuentas anuales, tu posición y tus análisis |
+| `cartera` | Resumen en EUR, efecto divisa, reparto y todas las posiciones |
+| `dividendos_cartera` | Proyección a 12 meses (por mes y pago) y cobrado por año |
+| `fiscal` | Bruto, retenciones y neto por año y país (con detalle de un año) |
+| `operaciones` | Compras, ventas y dividendos cobrados |
+| `seguimiento` | La lista de seguimiento con semáforo y precio de compra |
+| `guardar_analisis` / `historial_analisis` | Guarda en la app un análisis de Claude y los lee después |
+
+**Conectar (una sola vez):** en claude.ai, *Configuración → Conectores → Añadir conector
+personalizado*, con la URL que muestra la página **Claude** de la app
+(`https://<dominio>/stockscreener/mcp`). Claude se registra solo (OAuth 2.1 con registro
+dinámico y PKCE), abre la app para que entres con tu cuenta y pulses **Permitir**, y guarda el
+acceso en tu cuenta de Claude: sirve también en escritorio y móvil, y se renueva solo (token de
+acceso de 1 hora y de refresco de 180 días, rotatorio). Claude exige **HTTPS**: ver
+[deploy/README.md](deploy/README.md#https-para-claude).
+
+**Página Claude** (menú, con sesión): URL del conector, apps conectadas (con *Desconectar*),
+claves personales, análisis guardados e **historial** de todas las consultas (herramienta,
+argumentos, duración y si falló). Todo se guarda en la base de datos; de los tokens solo el hash.
+Los análisis de un valor se ven también en su ficha.
+
+**Claves personales** (para clientes con cabecera fija, como Claude Code):
+
+```bash
+claude mcp add --transport http stockscreener https://<dominio>/stockscreener/mcp --header "Authorization: Bearer ssk_..."
+```
+
+Se crean en la página Claude o con `docker compose exec stockscreener python -m app.cli mcp-key
+tu@email.com`. Si prefieres un cliente OAuth fijo en vez del registro automático (opción *Usar tu
+propio cliente OAuth* de Claude): `python -m app.cli mcp-client` da un `client_id` y su secreto.
+
+Configuración (`.env`): `PUBLIC_URL` (URL https pública, recomendable), `MCP_ENABLED` y
+`MCP_USERS` (emails que pueden conectar; vacío = todos, cada uno con sus datos).
 
 ## Cuentas de usuario
 

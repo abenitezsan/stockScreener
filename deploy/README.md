@@ -1,6 +1,6 @@
 # Despliegue en el VPS: proxy de entrada + tabbito + stockscreener
 
-El VPS solo expone el puerto 80. En lugar de que el nginx de tabbito haga también de proxy de
+El VPS expone el puerto 80 (y el 443 si se activa HTTPS, ver [HTTPS para Claude](#https-para-claude)). En lugar de que el nginx de tabbito haga también de proxy de
 las demás apps, hay un **proxy de entrada independiente** (`edge`) en su propia carpeta. Es el
 único contenedor que publica el puerto 80, y se conecta a la red de cada app:
 
@@ -113,13 +113,13 @@ docker compose exec stockscreener python -m app.cli refresh bootstrap    # ~1 ho
 | Actualizar stockscreener | `stockscreener/` | `docker compose pull && docker compose up -d` |
 | Logs del screener | `stockscreener/` | `tail -f logs/app.log` (web, peticiones y tareas programadas) · `logs/cli.log` (comandos) |
 | Copia de seguridad del screener | `stockscreener/` | `docker compose exec stockscreener python -m app.cli backup /data/backup-$(date +%F).db` (queda en `data/`) |
-| Cambiar la configuración de nginx | `edge/` | edita `conf.d/default.conf`, luego `docker compose exec nginx nginx -t && docker compose exec nginx nginx -s reload` |
+| Cambiar la configuración de nginx | `edge/` | edita `snippets/apps.conf` (rutas) o `conf.d/default.conf`, luego `docker compose exec nginx nginx -t && docker compose exec nginx nginx -s reload` |
 | Ver peticiones | `edge/` | `tail -f logs/access.log` |
 
 Para añadir otra app en el futuro:
 1. Dale a su red un nombre fijo en su `docker-compose.yml`.
 2. Añade esa red como `external` en `edge/docker-compose.yml`.
-3. Añade su `location` en `conf.d/default.conf`.
+3. Añade su `location` en `snippets/apps.conf` (sirve para HTTP y HTTPS).
 4. Ejecuta `docker compose up -d` en `edge/`.
 
 ## Notas
@@ -128,7 +128,40 @@ Para añadir otra app en el futuro:
   el screener queda accesible para cualquiera que conozca la URL. Si más adelante quieres
   restringirlo, se puede añadir un login en la propia app o limitar `/stockscreener/` por IP en
   `default.conf`, sin tocar tabbito.
-- **HTTPS.** Cuando quieras HTTPS, solo hay que tocar `edge/`; las apps no cambian.
-- **Nombre `app`.** En `default.conf`, tabbito se alcanza como `app` (el nombre de su servicio).
+- **HTTPS.** Ver la sección siguiente; solo se toca `edge/` (y `PUBLIC_URL` en el `.env`).
+- **Nombre `app`.** En `snippets/apps.conf`, tabbito se alcanza como `app` (el nombre de su servicio).
   Si alguna vez añades al proxy otra red con un servicio que también se llame `app`, usa en su
   lugar el nombre del contenedor (`tabbito-app-1`).
+
+## HTTPS para Claude
+
+El conector de Claude (`/stockscreener/mcp`) necesita HTTPS. El proxy lo activa con un
+certificado gratuito de Let's Encrypt. Sin dominio propio se usa `152-228-237-219.sslip.io`, un
+nombre público que siempre resuelve a la IP del VPS.
+
+1. Abre el puerto **443** en el firewall del VPS (además del 80), si lo hay.
+2. Actualiza la carpeta `edge/` con la de este repositorio (`docker-compose.yml`, `conf.d/`,
+   `snippets/`, `https.conf.template` y `enable-https.sh`) y ejecuta:
+
+   ```bash
+   cd /home/debian/edge
+   docker compose up -d
+   ./enable-https.sh                      # o: ./enable-https.sh midominio.com tu@email.com
+   ```
+
+   El script pide el certificado, genera `conf.d/https.conf`, recarga nginx y arranca el
+   contenedor `certbot`, que lo renueva solo (nginx se recarga cada 12 horas para tomarlo).
+   HTTP sigue funcionando igual en `http://152.228.237.219/...`.
+3. En `stockscreener/.env` añade la URL pública y reinicia la app:
+
+   ```bash
+   echo 'PUBLIC_URL=https://152-228-237-219.sslip.io/stockscreener' >> /home/debian/stockscreener/.env
+   cd /home/debian/stockscreener && docker compose up -d
+   ```
+
+4. Entra en `https://152-228-237-219.sslip.io/stockscreener/claude` y sigue los pasos para
+   añadir el conector en claude.ai.
+
+Además de `/stockscreener/`, el proxy reenvía a la app los metadatos de OAuth que Claude busca en
+la raíz del dominio (`/.well-known/oauth-authorization-server/stockscreener` y similares, en
+`snippets/apps.conf`).
