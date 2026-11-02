@@ -135,13 +135,65 @@ Para añadir otra app en el futuro:
 
 ## HTTPS para Claude
 
-El conector de Claude (`/stockscreener/mcp`) necesita HTTPS. El proxy lo activa con un
-certificado gratuito de Let's Encrypt. Sin dominio propio se usa `152-228-237-219.sslip.io`, un
-nombre público que siempre resuelve a la IP del VPS.
+El conector de Claude (`/stockscreener/mcp`) necesita HTTPS y que Claude encuentre los metadatos
+de OAuth en la **raíz** del dominio (`/.well-known/oauth-authorization-server/stockscreener` y
+similares). Las rutas que lo hacen están en `snippets/apps.conf`.
+
+### Con el dominio que ya tiene HTTPS (tabkiper.com)
+
+`https://tabkiper.com/stockscreener/` ya funciona, así que no hace falta pedir certificados.
+
+1. **Comprueba dónde se termina el HTTPS** (para no pisar esa configuración):
+
+   ```bash
+   curl -sI https://tabkiper.com/stockscreener/ | grep -i '^server'
+   ```
+
+   - `server: cloudflare` (u otro CDN/proxy delante): el HTTPS lo pone ese servicio y al VPS le
+     llega HTTP al puerto 80. Copia `snippets/apps.conf` y `conf.d/default.conf` de este
+     repositorio en `/home/debian/edge/` (el `docker-compose.yml` también vale tal cual).
+   - `server: nginx` y tu `edge/` del VPS ya tiene un `server { listen 443 ssl; ... }` propio:
+     **no lo sustituyas**. Copia `snippets/apps.conf` y añade en ese bloque 443 (y en el del 80)
+     la línea `include /etc/nginx/snippets/apps.conf;` en lugar de las `location` de las apps,
+     montando la carpeta `snippets` como en el `docker-compose.yml` del repositorio. Si
+     prefieres no tocar más, basta con copiar dentro de tu bloque 443 las dos `location ~
+     ^/\.well-known/...` del final de `snippets/apps.conf`.
+
+   Después: `cd /home/debian/edge && docker compose up -d && docker compose exec nginx nginx -t
+   && docker compose exec nginx nginx -s reload`.
+
+2. **URL pública de la app** (así los metadatos dicen `https://tabkiper.com/...` aunque al
+   contenedor le llegue HTTP):
+
+   ```bash
+   echo 'PUBLIC_URL=https://tabkiper.com/stockscreener' >> /home/debian/stockscreener/.env
+   cd /home/debian/stockscreener && docker compose pull && docker compose up -d
+   ```
+
+3. **Comprueba** que responde lo que Claude va a pedir:
+
+   ```bash
+   curl -s https://tabkiper.com/.well-known/oauth-authorization-server/stockscreener
+   curl -s https://tabkiper.com/.well-known/oauth-protected-resource/stockscreener/mcp
+   curl -si -X POST https://tabkiper.com/stockscreener/mcp | grep -i www-authenticate
+   ```
+
+   Los dos primeros deben devolver JSON con `https://tabkiper.com/stockscreener` y el tercero un
+   `401` con `resource_metadata="https://tabkiper.com/stockscreener/.well-known/..."`.
+   Con Cloudflare, si el modo «Bot Fight» o el WAF bloquean las peticiones de Claude (salen de
+   `160.79.104.0/21`), añade una regla que permita `/stockscreener/mcp`, `/stockscreener/oauth/*`
+   y `/.well-known/*`.
+
+4. Entra en `https://tabkiper.com/stockscreener/claude` y sigue los pasos para añadir el
+   conector en claude.ai con la URL `https://tabkiper.com/stockscreener/mcp`.
+
+### Sin dominio (solo la IP)
+
+El proxy puede pedir un certificado gratuito de Let's Encrypt para `152-228-237-219.sslip.io`, un
+nombre público que siempre resuelve a la IP del VPS:
 
 1. Abre el puerto **443** en el firewall del VPS (además del 80), si lo hay.
-2. Actualiza la carpeta `edge/` con la de este repositorio (`docker-compose.yml`, `conf.d/`,
-   `snippets/`, `https.conf.template` y `enable-https.sh`) y ejecuta:
+2. Actualiza la carpeta `edge/` con la de este repositorio y ejecuta:
 
    ```bash
    cd /home/debian/edge
@@ -151,17 +203,5 @@ nombre público que siempre resuelve a la IP del VPS.
 
    El script pide el certificado, genera `conf.d/https.conf`, recarga nginx y arranca el
    contenedor `certbot`, que lo renueva solo (nginx se recarga cada 12 horas para tomarlo).
-   HTTP sigue funcionando igual en `http://152.228.237.219/...`.
-3. En `stockscreener/.env` añade la URL pública y reinicia la app:
-
-   ```bash
-   echo 'PUBLIC_URL=https://152-228-237-219.sslip.io/stockscreener' >> /home/debian/stockscreener/.env
-   cd /home/debian/stockscreener && docker compose up -d
-   ```
-
-4. Entra en `https://152-228-237-219.sslip.io/stockscreener/claude` y sigue los pasos para
-   añadir el conector en claude.ai.
-
-Además de `/stockscreener/`, el proxy reenvía a la app los metadatos de OAuth que Claude busca en
-la raíz del dominio (`/.well-known/oauth-authorization-server/stockscreener` y similares, en
-`snippets/apps.conf`).
+3. Pon `PUBLIC_URL=https://152-228-237-219.sslip.io/stockscreener` en `stockscreener/.env` y
+   reinicia la app (`docker compose up -d`).

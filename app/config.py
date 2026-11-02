@@ -50,7 +50,7 @@ class Settings(BaseSettings):
 
     # Conector de Claude (servidor MCP en /mcp, ver README, «Claude»)
     mcp_enabled: bool = True
-    # URL pública de la app con su subruta, p. ej. https://152-228-237-219.sslip.io/stockscreener.
+    # URL pública de la app con su subruta, p. ej. https://tabkiper.com/stockscreener.
     # Vacía: se deduce de cada petición (esquema y host que reenvía nginx + ROOT_PATH).
     public_url: str = ""
     # Emails que pueden conectar Claude, separados por comas. Vacío: cualquier usuario (cada uno
