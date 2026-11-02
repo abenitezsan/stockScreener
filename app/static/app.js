@@ -117,3 +117,16 @@ document.addEventListener("DOMContentLoaded", () => {
     document.getElementById("saved-delete").hidden = true;
   });
 });
+
+// --- Dividendos: pulsar un mes del gráfico muestra su lista debajo -------------------------
+document.addEventListener("click", (event) => {
+  const bar = event.target.closest && event.target.closest("[data-div-month]");
+  if (!bar) return;
+  event.preventDefault();
+  const key = bar.dataset.divMonth;
+  for (const el of document.querySelectorAll("[data-div-month]")) el.classList.toggle("selected", el === bar);
+  for (const el of document.querySelectorAll("[data-div-list]")) el.hidden = el.dataset.divList !== key;
+  const url = new URL(location.href);
+  url.searchParams.set("mes", key);
+  history.replaceState(null, "", url);
+});

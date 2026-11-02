@@ -917,3 +917,76 @@ def test_last_dividend_change_compares_same_payment_last_year(client):
         s.query(DividendEvent).filter_by(security_id=sec.id).delete()
         s.delete(sec)
         s.commit()
+
+
+def test_dividends_by_pay_date_and_month_list(client):
+    """El reparto mensual va por fecha de cobro y cada mes tiene su lista cobrado/pendiente."""
+    import re
+    from collections import defaultdict
+
+    from sqlalchemy import select
+
+    from app.config import today
+    from app.models import DividendEvent
+
+    now = today()
+    user = _user(client, "mesdiv@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50\nBBB.MC; 20; 18"})
+    with _db() as s:
+        aaa, bbb = _sec(s, "AAA"), _sec(s, "BBB.MC")
+        last_ex = s.scalar(
+            select(DividendEvent.ex_date)
+            .where(DividendEvent.security_id == aaa.id, DividendEvent.ex_date <= now)
+            .order_by(DividendEvent.ex_date.desc())
+        )
+        # AAA: último dividendo cobrado hoy (fija el retraso ex → cobro del valor)
+        portfolio.add_received_dividend(
+            s, user.id, aaa, pay_date=now, shares=D(10), gross=D(4), ex_date=last_ex, fx_rate=D(1)
+        )
+        # BBB: un pago anunciado por el proveedor, con su fecha de cobro, este mismo mes
+        s.add(DividendEvent(security_id=bbb.id, ex_date=now, pay_date=now, amount=0.5))
+        s.commit()
+        try:
+            pos = portfolio.positions(s, user.id)
+            proj = portfolio.project_dividends(s, pos)
+            lag = portfolio._pay_lags(s, [aaa.id])[aaa.id]
+            by_month: dict[tuple[int, int], float] = defaultdict(float)
+            for item in proj.items:
+                by_month[(item.pay_date.year, item.pay_date.month)] += item.gross_eur
+                if item.security.id == aaa.id and item.pay_estimated:
+                    assert abs((item.pay_date - item.ex_date).days - lag) <= 1
+            # Cada mes suma lo que se cobra en él, no lo que corta ese mes
+            for year, month, amount in proj.months:
+                assert amount == pytest.approx(by_month[(year, month)])
+
+            cal = portfolio.dividend_calendar(s, user.id, proj)
+            assert cal.selected == f"{now.year}-{now.month:02d}"
+            current = cal.months[0]
+            paid = [i for i in current.items if i.paid]
+            pending = [i for i in current.items if not i.paid]
+            assert [i.security.symbol for i in paid] == ["AAA"] and paid[0].gross_eur == 4
+            assert paid[0].ex_date == last_ex and paid[0].pay_date == now
+            (bbb_item,) = [i for i in pending if i.security.id == bbb.id]
+            assert bbb_item.ex_date == now and bbb_item.pay_date == now
+            assert not bbb_item.estimated and not bbb_item.pay_estimated
+            assert bbb_item.gross_eur == pytest.approx(20 * 0.5)
+            # El cobro de AAA cubre su pago esperado: no sale además como pendiente
+            assert not any(i.security.id == aaa.id for i in pending)
+            assert current.pending == pytest.approx(sum(i.gross_eur for i in pending))
+
+            later = cal.months[3].key
+            other = portfolio.dividend_calendar(s, user.id, proj, month=later)
+            assert other.selected == later
+            assert portfolio.dividend_calendar(s, user.id, proj, month="basura").selected == (
+                cal.selected
+            )
+        finally:
+            s.query(DividendEvent).filter_by(security_id=bbb.id, ex_date=now).delete()
+            s.commit()
+            page = client.get("/portfolio?tab=dividendos").text
+    assert 'data-div-month="' in page and 'id="div-mes"' in page
+    assert "Cobrado</span>" in page and "fecha de cobro" in page
+    assert page.count("data-div-list=") == 12
+    assert len(re.findall(r'data-div-list="[\d-]+" hidden', page)) == 11  # solo el mes actual
+    other = client.get(f"/portfolio?tab=dividendos&mes={later}").text
+    assert f'data-div-list="{later}">' in other
