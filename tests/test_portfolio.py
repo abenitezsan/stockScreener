@@ -50,6 +50,16 @@ def test_parse_foreign_dividend_origin_withholding():
     assert doc.currency == "USD" and doc.fx_rate is None and doc.net_base is None
 
 
+def test_parse_foreign_dividend_with_fx_and_domestic_withholding():
+    doc = heytrade.parse_dividend(text("dividend_us_eur.txt"))
+    assert (doc.currency, doc.shares, doc.gross) == ("USD", D(42), D("11.40"))
+    assert doc.withholding_origin == D("1.71")
+    assert doc.withholding_domestic == D("1.84")  # 1,64 EUR pasados a USD
+    assert doc.net_base == D("6.99") and doc.fx_rate == D("0.890309")
+    assert doc.withholding_rate == D("0.15")
+    assert (doc.ex_date, doc.pay_date) == (date(2026, 9, 30), date(2026, 10, 16))
+
+
 def test_parse_errors():
     with pytest.raises(heytrade.ParseError):
         heytrade.pdf_text(b"no soy un pdf")
@@ -817,3 +827,220 @@ def test_mobile_sort_selector(client):
     # Una clave de columna de escritorio activa se conserva en el selector
     other = client.get("/portfolio?tab=posiciones&sort=shares&dir=asc").text
     assert '<option value="shares" selected>Acciones</option>' in other
+
+
+def test_day_change_splits_price_and_fx_in_spanish_day(client):
+    from datetime import UTC, datetime, timedelta
+
+    from app.config import today
+    from app.models import FxRate, Quote
+
+    user = _user(client, "fxday@example.com")
+    with _db() as s:
+        aaa = _sec(s, "AAA")  # USD
+        portfolio.add_transaction(
+            s,
+            user.id,
+            aaa,
+            kind="buy",
+            trade_date=date(2026, 1, 5),
+            quantity=D(10),
+            total_eur=D(500),
+            price=D(60),
+            currency="USD",
+            fx_rate=D("0.80"),
+        )
+        quote = s.get(Quote, aaa.id)
+        saved = (quote.price, quote.previous_close, quote.as_of)
+        today_utc = datetime.combine(today(), datetime.min.time(), tzinfo=UTC)
+        quote.price, quote.previous_close, quote.as_of = 110.0, 100.0, today_utc
+        old_fx = {
+            r.day: r.rate_to_base
+            for r in s.query(FxRate).filter_by(currency="USD").all()
+            if r.day >= today() - timedelta(days=1)
+        }
+        for day, rate in ((today() - timedelta(days=1), 0.90), (today(), 0.88)):
+            s.merge(FxRate(day=day, currency="USD", rate_to_base=rate))
+        s.commit()
+        try:
+            (pos,) = portfolio.positions(s, user.id)
+            assert pos.prev_fx == pytest.approx(0.90) and pos.fx == pytest.approx(0.88)
+            assert pos.day_price_eur == pytest.approx(10 * 10 * 0.90)  # precio, al cambio de ayer
+            assert pos.day_fx_eur == pytest.approx(10 * 110 * (0.88 - 0.90))  # divisa
+            assert pos.day_change_eur == pytest.approx(10 * (110 * 0.88 - 100 * 0.90))
+            assert pos.day_change_pct == pytest.approx(pos.day_change_eur / 900)
+            assert pos.fx_total_eur == pytest.approx(10 * 110 * (0.88 - 0.80))
+            summary = portfolio.summarize([pos])
+            (line,) = summary.fx_lines
+            assert line.currency == "USD" and line.day_pct == pytest.approx(0.88 / 0.90 - 1)
+            assert summary.day_change_eur == pytest.approx(
+                summary.day_price_eur + summary.day_fx_eur
+            )
+            assert "Efecto del tipo de cambio" in client.get("/portfolio?tab=posiciones").text
+
+            # Si la última sesión es anterior a hoy (hora española), hoy no se ha movido el precio
+            quote.as_of = today_utc - timedelta(days=1)
+            s.commit()
+            (pos,) = portfolio.positions(s, user.id)
+            assert pos.day_price_eur == pytest.approx(0)
+        finally:
+            quote.price, quote.previous_close, quote.as_of = saved
+            s.query(FxRate).filter(FxRate.day >= today() - timedelta(days=1)).delete()
+            for day, rate in old_fx.items():
+                s.add(FxRate(day=day, currency="USD", rate_to_base=rate))
+            s.commit()
+
+
+def test_last_dividend_change_compares_same_payment_last_year(client):
+    from app.models import DividendEvent, Security
+
+    with _db() as s:
+        sec = Security(symbol="LOGI.TEST", name="Logi", region="ES", currency="EUR")
+        s.add(sec)
+        s.flush()
+        # Pago grande (febrero) y pequeño (julio) cada año: el último sube un 10 % frente a su
+        # equivalente de hace un año aunque sea mucho menor que el pago inmediatamente anterior
+        for ex_date, amount in (
+            (date(2024, 2, 1), 1.00),
+            (date(2024, 7, 1), 0.40),
+            (date(2025, 2, 1), 1.10),
+            (date(2025, 7, 1), 0.44),
+        ):
+            s.add(DividendEvent(security_id=sec.id, ex_date=ex_date, amount=amount))
+        s.commit()
+        last = portfolio._last_dividend(s, sec.id)
+        assert last.ex_date == date(2025, 7, 1)
+        assert last.change == pytest.approx(0.10)
+        s.add(DividendEvent(security_id=sec.id, ex_date=date(2025, 11, 1), amount=0.2))
+        s.commit()
+        assert portfolio._last_dividend(s, sec.id).change is None  # sin pago equivalente
+        s.query(DividendEvent).filter_by(security_id=sec.id).delete()
+        s.delete(sec)
+        s.commit()
+
+
+def test_dividends_by_pay_date_and_month_list(client):
+    """El reparto mensual va por fecha de cobro y cada mes tiene su lista cobrado/pendiente."""
+    import re
+    from collections import defaultdict
+
+    from sqlalchemy import select
+
+    from app.config import today
+    from app.models import DividendEvent
+
+    now = today()
+    user = _user(client, "mesdiv@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50\nBBB.MC; 20; 18"})
+    with _db() as s:
+        aaa, bbb = _sec(s, "AAA"), _sec(s, "BBB.MC")
+        last_ex = s.scalar(
+            select(DividendEvent.ex_date)
+            .where(DividendEvent.security_id == aaa.id, DividendEvent.ex_date <= now)
+            .order_by(DividendEvent.ex_date.desc())
+        )
+        # AAA: último dividendo cobrado hoy (fija el retraso ex → cobro del valor)
+        portfolio.add_received_dividend(
+            s, user.id, aaa, pay_date=now, shares=D(10), gross=D(4), ex_date=last_ex, fx_rate=D(1)
+        )
+        # BBB: un pago anunciado por el proveedor, con su fecha de cobro, este mismo mes
+        s.add(DividendEvent(security_id=bbb.id, ex_date=now, pay_date=now, amount=0.5))
+        s.commit()
+        try:
+            pos = portfolio.positions(s, user.id)
+            proj = portfolio.project_dividends(s, pos)
+            lag = portfolio._pay_lags(s, [aaa.id])[aaa.id]
+            by_month: dict[tuple[int, int], float] = defaultdict(float)
+            for item in proj.items:
+                by_month[(item.pay_date.year, item.pay_date.month)] += item.gross_eur
+                if item.security.id == aaa.id and item.pay_estimated:
+                    assert abs((item.pay_date - item.ex_date).days - lag) <= 1
+            # Cada mes suma lo que se cobra en él, no lo que corta ese mes
+            for year, month, amount in proj.months:
+                assert amount == pytest.approx(by_month[(year, month)])
+
+            cal = portfolio.dividend_calendar(s, user.id, proj)
+            assert cal.selected == f"{now.year}-{now.month:02d}"
+            current = cal.months[0]
+            paid = [i for i in current.items if i.paid]
+            pending = [i for i in current.items if not i.paid]
+            assert [i.security.symbol for i in paid] == ["AAA"] and paid[0].gross_eur == 4
+            assert paid[0].ex_date == last_ex and paid[0].pay_date == now
+            (bbb_item,) = [i for i in pending if i.security.id == bbb.id]
+            assert bbb_item.ex_date == now and bbb_item.pay_date == now
+            assert not bbb_item.estimated and not bbb_item.pay_estimated
+            assert bbb_item.gross_eur == pytest.approx(20 * 0.5)
+            # El cobro de AAA cubre su pago esperado: no sale además como pendiente
+            assert not any(i.security.id == aaa.id for i in pending)
+            assert current.pending == pytest.approx(sum(i.gross_eur for i in pending))
+
+            later = cal.months[3].key
+            other = portfolio.dividend_calendar(s, user.id, proj, month=later)
+            assert other.selected == later
+            assert portfolio.dividend_calendar(s, user.id, proj, month="basura").selected == (
+                cal.selected
+            )
+        finally:
+            s.query(DividendEvent).filter_by(security_id=bbb.id, ex_date=now).delete()
+            s.commit()
+            page = client.get("/portfolio?tab=dividendos").text
+    assert 'data-div-month="' in page and 'id="div-mes"' in page
+    assert "Cobrado</span>" in page and "fecha de cobro" in page
+    assert page.count("data-div-list=") == 12
+    assert len(re.findall(r'data-div-list="[\d-]+" hidden', page)) == 11  # solo el mes actual
+    other = client.get(f"/portfolio?tab=dividendos&mes={later}").text
+    assert f'data-div-list="{later}">' in other
+
+
+def test_provider_dividend_dates_fix_pay_date(client):
+    """El calendario del proveedor (fecha ex y de pago) se guarda y la proyección lo usa."""
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app import jobs
+    from app.config import today
+    from app.models import DividendDate, DividendEvent
+    from tests.fake_provider import PAY_LAG, FakeProvider
+
+    now = today()
+    user = _user(client, "calendario-yahoo@example.com")
+    client.post("/portfolio/positions", data={"text": "AAA; 10; 50"})
+    provider = FakeProvider()
+    with _db() as s:
+        aaa = _sec(s, "AAA")
+        held = {sec.symbol for sec in jobs.held_securities(s)}
+        assert "AAA" in held and "DDD" not in held
+        assert jobs.refresh_dividend_dates(s, provider) >= 1
+        ex, pay = provider.get_dividend_dates("AAA")
+        assert s.get(DividendDate, (aaa.id, ex)).pay_date == pay
+
+        # El anunciado fija fechas del pago repetido; el importe sigue siendo estimado
+        (pos,) = portfolio.positions(s, user.id)
+        assert pos.next_dividend.ex_date == ex and not pos.next_dividend.estimated
+        proj = portfolio.project_dividends(s, [pos])
+        (item,) = [i for i in proj.items if i.ex_date == ex]
+        assert item.pay_date == pay and not item.pay_estimated and item.estimated
+        # El resto de pagos usa el retraso habitual (cobros registrados y calendario del proveedor)
+        lag = portfolio._pay_lags(s, [aaa.id])[aaa.id]
+        others = [i for i in proj.items if i.ex_date != ex and i.pay_estimated]
+        assert others and all(abs((i.pay_date - i.ex_date).days - lag) <= 1 for i in others)
+
+        # Si el dividendo ya está en el histórico, también se guarda allí su fecha de pago
+        last_ex = s.scalar(
+            select(DividendEvent.ex_date)
+            .where(DividendEvent.security_id == aaa.id, DividendEvent.ex_date <= now)
+            .order_by(DividendEvent.ex_date.desc())
+        )
+
+        class Past(FakeProvider):
+            def get_dividend_dates(self, symbol):
+                return last_ex, last_ex + timedelta(days=PAY_LAG)
+
+        assert jobs.refresh_dividend_dates(s, Past(), symbols=["AAA"]) == 1
+        event = s.scalar(
+            select(DividendEvent).where(
+                DividendEvent.security_id == aaa.id, DividendEvent.ex_date == last_ex
+            )
+        )
+        assert event.pay_date == last_ex + timedelta(days=PAY_LAG)

@@ -195,6 +195,19 @@ class DividendEvent(Base):
     amount: Mapped[float] = mapped_column(Double)
 
 
+class DividendDate(Base):
+    """Fechas ex y de pago de un dividendo anunciado, según el calendario del proveedor (que no
+    da el importe). Se guardan para no perderlas: Yahoo solo publica el próximo pago."""
+
+    __tablename__ = "dividend_dates"
+
+    security_id: Mapped[int] = mapped_column(
+        ForeignKey("securities.id", ondelete="CASCADE"), primary_key=True
+    )
+    ex_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    pay_date: Mapped[date] = mapped_column(Date)
+
+
 class Valuation(Base):
     """Análisis de dividendo y valoración, recalculado cada noche (docs/valoracion.md).
 

@@ -378,3 +378,14 @@ tr.held > td { background: var(--held-bg) !important; }
 }
 .pos-sort { margin: 0 0 0.5rem; justify-content: flex-end; }
 .pos-sort button { width: auto; flex: 0 0 auto; }
+
+/* --- Dividendos por mes: barras pulsables y lista del mes elegido ---------------------- */
+svg.div-chart .div-bar { cursor: pointer; color: inherit; text-decoration: none; }
+svg.div-chart .div-hit { fill: transparent; }
+svg.div-chart .div-bar:hover .div-hit, svg.div-chart .div-bar:focus-visible .div-hit { fill: var(--hi-bg); }
+svg.div-chart .div-bar.selected .div-hit { fill: var(--hi-bg); stroke: var(--status-warning); stroke-width: 1; }
+svg.div-chart .div-bar.selected text { font-weight: 700; }
+.div-list td { white-space: nowrap; }
+@media (max-width: 576px) { .div-list td, .div-list th { padding-inline: 0.3rem; font-size: 0.85rem; } }
+.tag.paid { background: color-mix(in srgb, var(--status-good) 18%, transparent); color: var(--status-good); }
+.tag.pending { background: var(--hi-bg); }

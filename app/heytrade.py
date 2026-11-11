@@ -9,7 +9,7 @@ Plantillas vistas hasta ahora:
   `Indicador de compra/venta = Venta`; no hay ejemplo real.
 - «Confirmación del abono de Dividendo Nacional» (retención solo en España).
   Los dividendos extranjeros se suponen con etiquetas de retención «en origen»/«en destino»;
-  tampoco hay ejemplo real.
+  el abono con cambio (retención en destino y neto en EUR) ya tiene ejemplo real.
 """
 
 import hashlib
@@ -179,20 +179,72 @@ def parse_dividend(text: str) -> DividendDoc:
     f = fields(text)
     currency = _need(f, "Divisa abono").upper()
     gross, _ = _amount(_need(f, "Importe bruto"), currency)
-    net, _ = _amount(_need(f, "Importe neto abonado"), currency)
+    net, net_cur = _amount(_need(f, "Importe neto abonado"), currency)
     per_share = parse_number(_need(f, "Importe unitario"))
     national = "nacional" in f.get("indicador de operación", "").lower()
 
+    # Dividendo extranjero con cambio: el bruto y la retención en origen van en `currency`; la
+    # retención en destino y el neto abonado, en EUR. Se pasa todo a `currency` con el cambio.
+    fx_rate: Decimal | None = Decimal(1) if currency == "EUR" else None
+    net_base: Decimal | None = net if currency == "EUR" else None
+    converted = currency != "EUR" and net_cur == "EUR"
+    if currency != "EUR":
+        for label in (
+            "tipo de cambio de divisa + comisión",
+            "tipo de cambio",
+            "tipo de cambio base",
+        ):
+            if label in f:
+                fx_rate = parse_number(f[label])
+                break
+        if fx_rate is None and "tipo de cambio de divisa base" in f:
+            fx_rate = parse_number(f["tipo de cambio de divisa base"])
+        if converted and fx_rate:
+            # El PDF da divisa por EUR (1,12 USD/EUR); las plantillas antiguas, EUR por divisa.
+            # Se elige el sentido que casa con el bruto en destino, o divisa por EUR si no hay.
+            inverse = 1 / fx_rate
+            gross_dest = (
+                _amount(f["importe bruto en destino"], "EUR")[0]
+                if ("importe bruto en destino" in f)
+                else None
+            )
+            origin_net = (
+                _amount(f["importe neto en origen"], currency)[0]
+                if ("importe neto en origen" in f)
+                else None
+            )
+            if gross_dest is not None and origin_net is not None:
+                if abs(origin_net * fx_rate - gross_dest) < abs(origin_net * inverse - gross_dest):
+                    pass  # ya es EUR por divisa
+                else:
+                    fx_rate = inverse
+            elif fx_rate > 1:
+                fx_rate = inverse
+    if fx_rate and fx_rate != 1:
+        fx_rate = fx_rate.quantize(Decimal("0.000001"))
+
+    def in_currency(amount: Decimal, cur: str | None) -> Decimal:
+        if cur == "EUR" and currency != "EUR" and fx_rate:
+            return (amount / fx_rate).quantize(Decimal("0.01"))
+        return amount
+
     origin = domestic = Decimal(0)
     rate = None
-    if "tipo de retención" in f:
-        rate = parse_number(f["tipo de retención"]) / 100
+    for label in (
+        "tipo de retención",
+        "tipo de retención en origen",
+        "tipo de retención en destino",
+    ):
+        if label in f:
+            rate = parse_number(f[label]) / 100
+            break
     for label, value in f.items():
         if not label.startswith("importe de retención") and not label.startswith(
             "importe retención"
         ):
             continue
-        amount = _amount(value, currency)[0]
+        amount, cur = _amount(value, currency)
+        amount = in_currency(amount, cur)
         if "origen" in label:
             origin += amount
         elif "destino" in label or national:
@@ -202,17 +254,16 @@ def parse_dividend(text: str) -> DividendDoc:
 
     fees = Decimal(0)
     if "gastos, comisiones e impuestos" in f:
-        fees = _amount(f["gastos, comisiones e impuestos"], currency)[0]
-    fx_rate: Decimal | None = Decimal(1) if currency == "EUR" else None
-    if currency != "EUR":
-        for label in ("tipo de cambio", "tipo de cambio base"):
-            if label in f:
-                fx_rate = parse_number(f[label])
-                break
-    net_base = net * fx_rate if fx_rate else None
-    if currency != "EUR" and "importe neto en euros" in f:
-        net_base = _amount(f["importe neto en euros"], "EUR")[0]
-        fx_rate = fx_rate or net_base / net
+        amount, cur = _amount(f["gastos, comisiones e impuestos"], currency)
+        fees = in_currency(amount, cur)
+    if converted:
+        net_base = net
+        net = in_currency(net, net_cur)
+    else:
+        net_base = net * fx_rate if fx_rate else None
+        if currency != "EUR" and "importe neto en euros" in f:
+            net_base = _amount(f["importe neto en euros"], "EUR")[0]
+            fx_rate = fx_rate or net_base / net
     if abs(gross - origin - domestic - fees - net) > Decimal("0.05"):
         raise ParseError("El bruto, las retenciones y el neto no cuadran")
     return DividendDoc(
