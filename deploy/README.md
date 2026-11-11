@@ -1,6 +1,6 @@
 # Despliegue en el VPS: proxy de entrada + tabbito + stockscreener
 
-El VPS expone el puerto 80 (y el 443 si se activa HTTPS, ver [HTTPS para Claude](#https-para-claude)). En lugar de que el nginx de tabbito haga también de proxy de
+El VPS solo expone el puerto 80. En lugar de que el nginx de tabbito haga también de proxy de
 las demás apps, hay un **proxy de entrada independiente** (`edge`) en su propia carpeta. Es el
 único contenedor que publica el puerto 80, y se conecta a la red de cada app:
 
@@ -113,95 +113,137 @@ docker compose exec stockscreener python -m app.cli refresh bootstrap    # ~1 ho
 | Actualizar stockscreener | `stockscreener/` | `docker compose pull && docker compose up -d` |
 | Logs del screener | `stockscreener/` | `tail -f logs/app.log` (web, peticiones y tareas programadas) · `logs/cli.log` (comandos) |
 | Copia de seguridad del screener | `stockscreener/` | `docker compose exec stockscreener python -m app.cli backup /data/backup-$(date +%F).db` (queda en `data/`) |
-| Cambiar la configuración de nginx | `edge/` | edita `snippets/apps.conf` (rutas) o `conf.d/default.conf`, luego `docker compose exec nginx nginx -t && docker compose exec nginx nginx -s reload` |
+| Cambiar la configuración de nginx | `edge/` | edita `conf.d/default.conf`, luego `docker compose exec nginx nginx -t && docker compose exec nginx nginx -s reload` |
 | Ver peticiones | `edge/` | `tail -f logs/access.log` |
 
 Para añadir otra app en el futuro:
 1. Dale a su red un nombre fijo en su `docker-compose.yml`.
 2. Añade esa red como `external` en `edge/docker-compose.yml`.
-3. Añade su `location` en `snippets/apps.conf` (sirve para HTTP y HTTPS).
+3. Añade su `location` en `conf.d/default.conf`.
 4. Ejecuta `docker compose up -d` en `edge/`.
+
+## HTTPS (Let's Encrypt)
+
+Dominio `tabkiper.com` (registros A del dominio y de `www` apuntando al VPS). El proxy termina
+TLS y sirve tabbito desde la **raíz** del dominio (`https://tabkiper.com/admin/...`,
+`/site/...`, `/webchat/...`, `/api/...`), stockscreener en `https://tabkiper.com/stockscreener/`,
+`www` redirige al dominio sin www, y `/tabbito/` sigue funcionando por compatibilidad. El acceso
+por IP sigue siendo HTTP y con las rutas de siempre.
+
+nginx no arranca referenciando un certificado que aún no existe, así que la primera vez se usa
+`bootstrap.conf` (solo HTTP + el reto ACME) y luego la configuración final.
+
+```bash
+sudo mkdir -p /var/www/certbot /etc/letsencrypt
+cd /home/debian/edge
+
+# 1. Arrancar con la config de arranque
+cp conf.d/default.conf conf.d/default.conf.final
+cp bootstrap.conf conf.d/default.conf
+docker compose up -d --force-recreate
+
+# 2. Emitir el certificado (dominio y www)
+docker run --rm \
+  -v /etc/letsencrypt:/etc/letsencrypt -v /var/www/certbot:/var/www/certbot \
+  certbot/certbot certonly --webroot -w /var/www/certbot \
+  -d tabkiper.com -d www.tabkiper.com --email TU_CORREO --agree-tos --no-eff-email
+
+# 3. Poner la config final y recargar
+mv conf.d/default.conf.final conf.d/default.conf
+docker compose exec nginx nginx -t && docker compose up -d --force-recreate
+```
+
+Comprueba `https://tabkiper.com/site/index.html`, `https://tabkiper.com/admin/login.html` y
+`https://tabkiper.com/stockscreener/`.
+
+**Renovación**: los certificados duran 90 días. Cron del host (`sudo crontab -e`):
+
+```
+0 4 * * * docker run --rm -v /etc/letsencrypt:/etc/letsencrypt -v /var/www/certbot:/var/www/certbot certbot/certbot renew --quiet && docker compose -f /home/debian/edge/docker-compose.yml exec -T nginx nginx -s reload
+```
+
+**En tabbito** (`.env.prod`), para webhooks y enlaces:
+
+```
+ADMIN_BASE_URL=https://tabkiper.com/admin
+SPRING_PROFILES_ACTIVE=pro
+TELEGRAM_WEBHOOK_BASE_URL=https://tabkiper.com
+```
+
+La ruta pública de tabbito pasa de `/tabbito/admin` a `/admin`, por eso `ADMIN_BASE_URL` ya no
+lleva el prefijo (los callbacks de Redsys y PayPal derivan su origen de ese valor).
+
+## Monitorización (mon.tabkiper.com)
+
+El proxy publica la monitorización de tabbito (proyecto `tabbito-monitoring`, en el repo de
+tabbito: `docker-compose.monitoring.yml`) en un subdominio, **todo detrás de contraseña**:
+
+- `https://mon.tabkiper.com/vm/vmui/` — consultas sobre las métricas (VictoriaMetrics).
+- `https://mon.tabkiper.com/traffic/` — informe de GoAccess sobre `logs/access.log` de este proxy.
+
+Puesta en marcha, una sola vez:
+
+```bash
+# 1. DNS: registro A de mon.tabkiper.com hacia el VPS (en OVH).
+
+# 2. Contraseña. El fichero no se versiona (deploy/edge/auth/*).
+cd /home/debian/edge
+printf 'admin:%s\n' "$(openssl passwd -apr1)" > auth/monitor.htpasswd
+
+# 3. Aplicar la config y recargar (el bloque HTTPS de mon ya usa el certificado actual,
+#    pero el navegador avisará de nombre inválido hasta el paso 4).
+docker compose up -d --force-recreate
+
+# 4. Ampliar el certificado con el subdominio (mismo certificado, un nombre más).
+docker run --rm \
+  -v /etc/letsencrypt:/etc/letsencrypt -v /var/www/certbot:/var/www/certbot \
+  certbot/certbot certonly --webroot -w /var/www/certbot --expand \
+  -d tabkiper.com -d www.tabkiper.com -d mon.tabkiper.com
+docker compose exec nginx nginx -s reload
+```
+
+El informe `/traffic/` lo escribe el proyecto de monitorización en
+`/home/debian/tabbito/monitoring/report` y este proxy lo monta en solo lectura; hasta que ese
+proyecto no esté en marcha, `/traffic/` da 404 y `/vm/` da 502.
+
+## Claude (conector MCP)
+
+stockscreener expone un servidor MCP en `https://tabkiper.com/stockscreener/mcp` (ver el README
+principal, «Claude»). Claude busca los metadatos de OAuth en la raíz del dominio
+(`/.well-known/oauth-authorization-server/stockscreener` y
+`/.well-known/oauth-protected-resource/stockscreener/mcp`); en `conf.d/default.conf`, el bloque
+HTTPS de `tabkiper.com` los reenvía a stockscreener **antes** de `location /` (si no, irían a
+tabbito). Los demás `.well-known` de la raíz siguen yendo a tabbito.
+
+Puesta en marcha, una sola vez:
+
+```bash
+# 1. Proxy: copiar conf.d/default.conf de este repositorio a /home/debian/edge/conf.d/ y recargar
+cd /home/debian/edge
+docker compose exec nginx nginx -t && docker compose exec nginx nginx -s reload
+
+# 2. App: URL pública y versión nueva (la migración de la base de datos se aplica sola)
+cd /home/debian/stockscreener
+grep -q '^PUBLIC_URL=' .env 2>/dev/null || echo 'PUBLIC_URL=https://tabkiper.com/stockscreener' >> .env
+docker compose pull && docker compose up -d
+
+# 3. Comprobar (JSON con "https://tabkiper.com/stockscreener" y un 401 con resource_metadata)
+curl -s https://tabkiper.com/.well-known/oauth-authorization-server/stockscreener; echo
+curl -si -X POST https://tabkiper.com/stockscreener/mcp | grep -i '^www-authenticate'
+```
+
+Después, en claude.ai: *Configuración → Conectores → Añadir conector personalizado*, URL
+`https://tabkiper.com/stockscreener/mcp`, *Conectar*, entrar con la cuenta de la app y
+*Permitir*. La página `https://tabkiper.com/stockscreener/claude` muestra las apps conectadas, el
+historial de consultas y los análisis guardados.
 
 ## Notas
 
-- **Sin autenticación en el proxy.** El proxy no pide contraseña: tabbito usa la suya propia, y
+- **Sin autenticación en el proxy** (salvo `mon.tabkiper.com`, ver arriba). El proxy no pide contraseña: tabbito usa la suya propia, y
   el screener queda accesible para cualquiera que conozca la URL. Si más adelante quieres
   restringirlo, se puede añadir un login en la propia app o limitar `/stockscreener/` por IP en
   `default.conf`, sin tocar tabbito.
-- **HTTPS.** Ver la sección siguiente; solo se toca `edge/` (y `PUBLIC_URL` en el `.env`).
-- **Nombre `app`.** En `snippets/apps.conf`, tabbito se alcanza como `app` (el nombre de su servicio).
+- **HTTPS.** Se hace solo en `edge/`; las apps no cambian. Ver la sección "HTTPS".
+- **Nombre `app`.** En `default.conf`, tabbito se alcanza como `app` (el nombre de su servicio).
   Si alguna vez añades al proxy otra red con un servicio que también se llame `app`, usa en su
   lugar el nombre del contenedor (`tabbito-app-1`).
-
-## HTTPS para Claude
-
-El conector de Claude (`/stockscreener/mcp`) necesita HTTPS y que Claude encuentre los metadatos
-de OAuth en la **raíz** del dominio (`/.well-known/oauth-authorization-server/stockscreener` y
-similares). Las rutas que lo hacen están en `snippets/apps.conf`.
-
-### Con el dominio que ya tiene HTTPS (tabkiper.com)
-
-`https://tabkiper.com/stockscreener/` ya funciona, así que no hace falta pedir certificados.
-
-1. **Comprueba dónde se termina el HTTPS** (para no pisar esa configuración):
-
-   ```bash
-   curl -sI https://tabkiper.com/stockscreener/ | grep -i '^server'
-   ```
-
-   - `server: cloudflare` (u otro CDN/proxy delante): el HTTPS lo pone ese servicio y al VPS le
-     llega HTTP al puerto 80. Copia `snippets/apps.conf` y `conf.d/default.conf` de este
-     repositorio en `/home/debian/edge/` (el `docker-compose.yml` también vale tal cual).
-   - `server: nginx` y tu `edge/` del VPS ya tiene un `server { listen 443 ssl; ... }` propio:
-     **no lo sustituyas**. Copia `snippets/apps.conf` y añade en ese bloque 443 (y en el del 80)
-     la línea `include /etc/nginx/snippets/apps.conf;` en lugar de las `location` de las apps,
-     montando la carpeta `snippets` como en el `docker-compose.yml` del repositorio. Si
-     prefieres no tocar más, basta con copiar dentro de tu bloque 443 las dos `location ~
-     ^/\.well-known/...` del final de `snippets/apps.conf`.
-
-   Después: `cd /home/debian/edge && docker compose up -d && docker compose exec nginx nginx -t
-   && docker compose exec nginx nginx -s reload`.
-
-2. **URL pública de la app** (así los metadatos dicen `https://tabkiper.com/...` aunque al
-   contenedor le llegue HTTP):
-
-   ```bash
-   echo 'PUBLIC_URL=https://tabkiper.com/stockscreener' >> /home/debian/stockscreener/.env
-   cd /home/debian/stockscreener && docker compose pull && docker compose up -d
-   ```
-
-3. **Comprueba** que responde lo que Claude va a pedir:
-
-   ```bash
-   curl -s https://tabkiper.com/.well-known/oauth-authorization-server/stockscreener
-   curl -s https://tabkiper.com/.well-known/oauth-protected-resource/stockscreener/mcp
-   curl -si -X POST https://tabkiper.com/stockscreener/mcp | grep -i www-authenticate
-   ```
-
-   Los dos primeros deben devolver JSON con `https://tabkiper.com/stockscreener` y el tercero un
-   `401` con `resource_metadata="https://tabkiper.com/stockscreener/.well-known/..."`.
-   Con Cloudflare, si el modo «Bot Fight» o el WAF bloquean las peticiones de Claude (salen de
-   `160.79.104.0/21`), añade una regla que permita `/stockscreener/mcp`, `/stockscreener/oauth/*`
-   y `/.well-known/*`.
-
-4. Entra en `https://tabkiper.com/stockscreener/claude` y sigue los pasos para añadir el
-   conector en claude.ai con la URL `https://tabkiper.com/stockscreener/mcp`.
-
-### Sin dominio (solo la IP)
-
-El proxy puede pedir un certificado gratuito de Let's Encrypt para `152-228-237-219.sslip.io`, un
-nombre público que siempre resuelve a la IP del VPS:
-
-1. Abre el puerto **443** en el firewall del VPS (además del 80), si lo hay.
-2. Actualiza la carpeta `edge/` con la de este repositorio y ejecuta:
-
-   ```bash
-   cd /home/debian/edge
-   docker compose up -d
-   ./enable-https.sh                      # o: ./enable-https.sh midominio.com tu@email.com
-   ```
-
-   El script pide el certificado, genera `conf.d/https.conf`, recarga nginx y arranca el
-   contenedor `certbot`, que lo renueva solo (nginx se recarga cada 12 horas para tomarlo).
-3. Pon `PUBLIC_URL=https://152-228-237-219.sslip.io/stockscreener` en `stockscreener/.env` y
-   reinicia la app (`docker compose up -d`).

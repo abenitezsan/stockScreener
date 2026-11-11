@@ -106,7 +106,7 @@ personalizado*, con la URL que muestra la página **Claude** de la app
 dinámico y PKCE), abre la app para que entres con tu cuenta y pulses **Permitir**, y guarda el
 acceso en tu cuenta de Claude: sirve también en escritorio y móvil, y se renueva solo (token de
 acceso de 1 hora y de refresco de 180 días, rotatorio). Claude exige **HTTPS**: ver
-[deploy/README.md](deploy/README.md#https-para-claude).
+[deploy/README.md](deploy/README.md#claude-conector-mcp).
 
 **Página Claude** (menú, con sesión): URL del conector, apps conectadas (con *Desconectar*),
 claves personales, análisis guardados e **historial** de todas las consultas (herramienta,
