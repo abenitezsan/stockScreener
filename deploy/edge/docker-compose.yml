@@ -1,7 +1,8 @@
-# Proxy de entrada del VPS: el único contenedor que publica el puerto 80.
+# Proxy de entrada del VPS: el único contenedor que publica los puertos 80 y 443.
 # Reparte por ruta entre las apps, cada una en su propio proyecto de Docker Compose:
 #   /tabbito/        -> tabbito (red de tabbito)
 #   /stockscreener/  -> stockscreener (red stockscreener-net)
+#   mon.tabkiper.com -> monitorización de tabbito (VictoriaMetrics en la red de tabbito)
 #
 # Arranca después de las apps (sus redes tienen que existir):
 #   docker compose up -d
@@ -13,10 +14,19 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+      - "443:443"
     volumes:
+      # Certificados de Let's Encrypt (los escribe certbot en el host) y la carpeta donde
+      # certbot deja el reto HTTP-01. Ver deploy/README.md "HTTPS".
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
       # Directorio completo (no ficheros sueltos): los cambios se ven con un simple reload
       - ./conf.d:/etc/nginx/conf.d:ro
       - ./logs:/var/log/nginx
+      # Monitorización (mon.tabkiper.com): la contraseña (htpasswd, no se versiona) y el informe
+      # de GoAccess que genera el proyecto tabbito-monitoring en el host.
+      - ./auth:/etc/nginx/auth:ro
+      - /home/debian/tabbito/monitoring/report:/srv/monitor-report:ro
     networks:
       - tabbito
       - stockscreener

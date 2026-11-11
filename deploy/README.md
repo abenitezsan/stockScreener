@@ -122,13 +122,97 @@ Para añadir otra app en el futuro:
 3. Añade su `location` en `conf.d/default.conf`.
 4. Ejecuta `docker compose up -d` en `edge/`.
 
+## HTTPS (Let's Encrypt)
+
+Dominio `tabkiper.com` (registros A del dominio y de `www` apuntando al VPS). El proxy termina
+TLS y sirve tabbito desde la **raíz** del dominio (`https://tabkiper.com/admin/...`,
+`/site/...`, `/webchat/...`, `/api/...`), stockscreener en `https://tabkiper.com/stockscreener/`,
+`www` redirige al dominio sin www, y `/tabbito/` sigue funcionando por compatibilidad. El acceso
+por IP sigue siendo HTTP y con las rutas de siempre.
+
+nginx no arranca referenciando un certificado que aún no existe, así que la primera vez se usa
+`bootstrap.conf` (solo HTTP + el reto ACME) y luego la configuración final.
+
+```bash
+sudo mkdir -p /var/www/certbot /etc/letsencrypt
+cd /home/debian/edge
+
+# 1. Arrancar con la config de arranque
+cp conf.d/default.conf conf.d/default.conf.final
+cp bootstrap.conf conf.d/default.conf
+docker compose up -d --force-recreate
+
+# 2. Emitir el certificado (dominio y www)
+docker run --rm \
+  -v /etc/letsencrypt:/etc/letsencrypt -v /var/www/certbot:/var/www/certbot \
+  certbot/certbot certonly --webroot -w /var/www/certbot \
+  -d tabkiper.com -d www.tabkiper.com --email TU_CORREO --agree-tos --no-eff-email
+
+# 3. Poner la config final y recargar
+mv conf.d/default.conf.final conf.d/default.conf
+docker compose exec nginx nginx -t && docker compose up -d --force-recreate
+```
+
+Comprueba `https://tabkiper.com/site/index.html`, `https://tabkiper.com/admin/login.html` y
+`https://tabkiper.com/stockscreener/`.
+
+**Renovación**: los certificados duran 90 días. Cron del host (`sudo crontab -e`):
+
+```
+0 4 * * * docker run --rm -v /etc/letsencrypt:/etc/letsencrypt -v /var/www/certbot:/var/www/certbot certbot/certbot renew --quiet && docker compose -f /home/debian/edge/docker-compose.yml exec -T nginx nginx -s reload
+```
+
+**En tabbito** (`.env.prod`), para webhooks y enlaces:
+
+```
+ADMIN_BASE_URL=https://tabkiper.com/admin
+SPRING_PROFILES_ACTIVE=pro
+TELEGRAM_WEBHOOK_BASE_URL=https://tabkiper.com
+```
+
+La ruta pública de tabbito pasa de `/tabbito/admin` a `/admin`, por eso `ADMIN_BASE_URL` ya no
+lleva el prefijo (los callbacks de Redsys y PayPal derivan su origen de ese valor).
+
+## Monitorización (mon.tabkiper.com)
+
+El proxy publica la monitorización de tabbito (proyecto `tabbito-monitoring`, en el repo de
+tabbito: `docker-compose.monitoring.yml`) en un subdominio, **todo detrás de contraseña**:
+
+- `https://mon.tabkiper.com/vm/vmui/` — consultas sobre las métricas (VictoriaMetrics).
+- `https://mon.tabkiper.com/traffic/` — informe de GoAccess sobre `logs/access.log` de este proxy.
+
+Puesta en marcha, una sola vez:
+
+```bash
+# 1. DNS: registro A de mon.tabkiper.com hacia el VPS (en OVH).
+
+# 2. Contraseña. El fichero no se versiona (deploy/edge/auth/*).
+cd /home/debian/edge
+printf 'admin:%s\n' "$(openssl passwd -apr1)" > auth/monitor.htpasswd
+
+# 3. Aplicar la config y recargar (el bloque HTTPS de mon ya usa el certificado actual,
+#    pero el navegador avisará de nombre inválido hasta el paso 4).
+docker compose up -d --force-recreate
+
+# 4. Ampliar el certificado con el subdominio (mismo certificado, un nombre más).
+docker run --rm \
+  -v /etc/letsencrypt:/etc/letsencrypt -v /var/www/certbot:/var/www/certbot \
+  certbot/certbot certonly --webroot -w /var/www/certbot --expand \
+  -d tabkiper.com -d www.tabkiper.com -d mon.tabkiper.com
+docker compose exec nginx nginx -s reload
+```
+
+El informe `/traffic/` lo escribe el proyecto de monitorización en
+`/home/debian/tabbito/monitoring/report` y este proxy lo monta en solo lectura; hasta que ese
+proyecto no esté en marcha, `/traffic/` da 404 y `/vm/` da 502.
+
 ## Notas
 
-- **Sin autenticación en el proxy.** El proxy no pide contraseña: tabbito usa la suya propia, y
+- **Sin autenticación en el proxy** (salvo `mon.tabkiper.com`, ver arriba). El proxy no pide contraseña: tabbito usa la suya propia, y
   el screener queda accesible para cualquiera que conozca la URL. Si más adelante quieres
   restringirlo, se puede añadir un login en la propia app o limitar `/stockscreener/` por IP en
   `default.conf`, sin tocar tabbito.
-- **HTTPS.** Cuando quieras HTTPS, solo hay que tocar `edge/`; las apps no cambian.
+- **HTTPS.** Se hace solo en `edge/`; las apps no cambian. Ver la sección "HTTPS".
 - **Nombre `app`.** En `default.conf`, tabbito se alcanza como `app` (el nombre de su servicio).
   Si alguna vez añades al proxy otra red con un servicio que también se llame `app`, usa en su
   lugar el nombre del contenedor (`tabbito-app-1`).
